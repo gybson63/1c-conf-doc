@@ -9,6 +9,7 @@
 
 ### Added
 
+- Документ [ARCHITECTURE.md](ARCHITECTURE.md) — описание архитектуры проекта (включая подробный раздел про FAISS).
 - API: `GET /objects/{type}/{name}` и `GET /objects/{type}/{name}/chunks/{index}` — карточка объекта и текст чанка для удалённого доступа.
 - Параметр `full` в `POST /search` (полный текст чанка, аналог CLI `--full`).
 - Cursor skill `conf-doc-search` в каталоге `skills/conf-doc-search/` — workflow через HTTP API.
