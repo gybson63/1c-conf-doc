@@ -9,6 +9,11 @@
 
 ### Added
 
+- Инкрементальная пересборка чанков: только для изменённых или удалённых объектов; повторный `index` без изменений сохраняет `chunks.id`.
+- Кэш эмбеддингов в SQLite (`embedding_cache`): ключ `(config_id, content_hash, model)`; API вызывается только для cache miss.
+- Инкрементальный `build_embeddings`: сбор FAISS из кэша + новых векторов; счётчики `embeddings_cached` / `embeddings_computed`.
+- Флаги `--force` для `conf-doc index` и `conf-doc embed`; параметр `"force"` в `POST /reindex`.
+- Метаданные модели в `chunk_map.json` (`model`, `built_at`); auto-detect смены модели и параметров chunking.
 - Документ [ARCHITECTURE.md](ARCHITECTURE.md) — описание архитектуры проекта (включая подробный раздел про FAISS).
 - API: `GET /objects/{type}/{name}` и `GET /objects/{type}/{name}/chunks/{index}` — карточка объекта и текст чанка для удалённого доступа.
 - Параметр `full` в `POST /search` (полный текст чанка, аналог CLI `--full`).
@@ -21,4 +26,5 @@
 
 ### Changed
 
+- Поток индексации: удаление объектов, исчезнувших из XML-выгрузки; расширенный `embedding_status()`.
 - Базовая ветка разработки: `main` (отслеживает `origin/main`).

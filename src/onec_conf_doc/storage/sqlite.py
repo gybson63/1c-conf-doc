@@ -21,6 +21,7 @@ CREATE TABLE IF NOT EXISTS configurations (
     export_path TEXT NOT NULL DEFAULT '',
     indexed_at TEXT NOT NULL,
     content_hash TEXT NOT NULL,
+    chunking_hash TEXT NOT NULL DEFAULT '',
     UNIQUE(name)
 );
 
@@ -99,12 +100,25 @@ CREATE INDEX IF NOT EXISTS idx_objects_config ON metadata_objects(config_id);
 CREATE INDEX IF NOT EXISTS idx_objects_type ON metadata_objects(object_type);
 CREATE INDEX IF NOT EXISTS idx_objects_name ON metadata_objects(name);
 CREATE INDEX IF NOT EXISTS idx_chunks_object ON chunks(object_id);
+
+CREATE TABLE IF NOT EXISTS embedding_cache (
+    config_id INTEGER NOT NULL REFERENCES configurations(id) ON DELETE CASCADE,
+    content_hash TEXT NOT NULL,
+    model TEXT NOT NULL,
+    dimension INTEGER NOT NULL,
+    vector BLOB NOT NULL,
+    created_at TEXT NOT NULL,
+    PRIMARY KEY (config_id, content_hash, model)
+);
+
+CREATE INDEX IF NOT EXISTS idx_embedding_cache_config ON embedding_cache(config_id);
 """
 
 MIGRATIONS = (
     "ALTER TABLE configurations ADD COLUMN synonym TEXT NOT NULL DEFAULT ''",
     "ALTER TABLE configurations ADD COLUMN export_path TEXT NOT NULL DEFAULT ''",
     "ALTER TABLE index_runs ADD COLUMN config_id INTEGER REFERENCES configurations(id)",
+    "ALTER TABLE configurations ADD COLUMN chunking_hash TEXT NOT NULL DEFAULT ''",
 )
 
 
@@ -436,6 +450,23 @@ class SQLiteIndexer:
         cfg = self.get_configuration(name)
         return cfg.id if cfg else None
 
+    def get_configuration_chunking_hash(self, config_id: int) -> str:
+        with self.connect() as conn:
+            row = conn.execute(
+                "SELECT chunking_hash FROM configurations WHERE id = ?",
+                (config_id,),
+            ).fetchone()
+        if row is None:
+            return ""
+        return str(row["chunking_hash"] or "")
+
+    def set_configuration_chunking_hash(self, config_id: int, chunking_hash: str) -> None:
+        with self.connect() as conn:
+            conn.execute(
+                "UPDATE configurations SET chunking_hash = ? WHERE id = ?",
+                (chunking_hash, config_id),
+            )
+
     def list_objects(
         self,
         *,
@@ -501,6 +532,60 @@ class SQLiteIndexer:
                 """,
                 (config_id,),
             )
+
+    def delete_chunks_for_object(self, object_id: int) -> None:
+        with self.connect() as conn:
+            conn.execute("DELETE FROM chunks WHERE object_id = ?", (object_id,))
+
+    def delete_objects_not_in_scan(
+        self,
+        config_id: int,
+        keys: set[tuple[str, str]],
+    ) -> list[int]:
+        with self.connect() as conn:
+            rows = conn.execute(
+                """
+                SELECT id, object_type, name
+                FROM metadata_objects
+                WHERE config_id = ?
+                """,
+                (config_id,),
+            ).fetchall()
+            deleted: list[int] = []
+            for row in rows:
+                key = (str(row["object_type"]), str(row["name"]))
+                if key not in keys:
+                    object_id = int(row["id"])
+                    conn.execute("DELETE FROM metadata_objects WHERE id = ?", (object_id,))
+                    deleted.append(object_id)
+            return deleted
+
+    def get_chunk_ids_for_config(self, config_id: int) -> list[int]:
+        with self.connect() as conn:
+            rows = conn.execute(
+                """
+                SELECT c.id
+                FROM chunks c
+                JOIN metadata_objects o ON o.id = c.object_id
+                WHERE o.config_id = ?
+                ORDER BY c.id
+                """,
+                (config_id,),
+            ).fetchall()
+        return [int(r["id"]) for r in rows]
+
+    def count_chunks_for_config(self, config_id: int) -> int:
+        with self.connect() as conn:
+            row = conn.execute(
+                """
+                SELECT count(*)
+                FROM chunks c
+                JOIN metadata_objects o ON o.id = c.object_id
+                WHERE o.config_id = ?
+                """,
+                (config_id,),
+            ).fetchone()
+        return int(row[0]) if row else 0
 
     def insert_chunks(
         self,

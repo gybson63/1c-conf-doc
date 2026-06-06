@@ -47,3 +47,11 @@ def test_index_pipeline_without_embeddings(tmp_path: Path) -> None:
     stats2 = pipeline.index_export(skip_embeddings=True)
     assert stats2.objects_skipped == 3
     assert stats2.objects_updated == 0
+    assert stats2.chunks_rebuilt == 0
+
+    config_id = pipeline.active_configuration.id
+    chunk_ids_first = pipeline.indexer.get_chunk_ids_for_config(config_id)
+    stats3 = pipeline.index_export(skip_embeddings=True)
+    chunk_ids_second = pipeline.indexer.get_chunk_ids_for_config(config_id)
+    assert chunk_ids_first == chunk_ids_second
+    assert stats3.chunks_rebuilt == 0

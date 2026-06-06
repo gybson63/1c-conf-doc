@@ -12,6 +12,7 @@ from onec_conf_doc.rag.pipeline import Pipeline
 
 class ReindexRequest(BaseModel):
     skip_embeddings: bool = False
+    force: bool = False
 
 
 class SearchRequest(BaseModel):
@@ -63,14 +64,18 @@ def create_router() -> APIRouter:
     @router.post("/reindex")
     def reindex(body: ReindexRequest, request: Request) -> dict[str, Any]:
         pipeline = get_pipeline(request)
-        stats = pipeline.index_export(skip_embeddings=body.skip_embeddings)
+        stats = pipeline.index_export(skip_embeddings=body.skip_embeddings, force=body.force)
         return {
             "configuration_name": stats.configuration_name,
             "configuration_synonym": stats.configuration_synonym,
             "objects_total": stats.objects_total,
             "objects_updated": stats.objects_updated,
             "objects_skipped": stats.objects_skipped,
+            "objects_deleted": stats.objects_deleted,
             "chunks_total": stats.chunks_total,
+            "chunks_rebuilt": stats.chunks_rebuilt,
+            "embeddings_cached": stats.embeddings_cached,
+            "embeddings_computed": stats.embeddings_computed,
         }
 
     @router.get("/objects")

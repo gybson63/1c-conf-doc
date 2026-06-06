@@ -56,22 +56,30 @@ flowchart LR
   A[XML export] --> B[scan_export]
   B --> C[parse_metadata_file]
   C --> D{hash changed?}
-  D -->|да| E[write_markdown]
+  D -->|да| E[write_markdown + upsert]
   D -->|нет| F[skip object]
-  E --> G[upsert SQLite]
-  G --> H[clear_chunks + chunk_file]
-  H --> I[embed_documents]
-  I --> J[FAISS build + save]
+  E --> G[delete removed objects]
+  F --> G
+  G --> H{chunks changed?}
+  H -->|да| I[chunk_file per object]
+  H -->|нет| J[keep chunks]
+  I --> K{content_hash in cache?}
+  J --> K
+  K -->|да| L[reuse vector]
+  K -->|нет| M[embed batch API]
+  L --> N[FAISS rebuild from vectors]
+  M --> N
 ```
 
 1. **Configuration.xml** — имя, версия, синоним конфигурации (`upsert_configuration`).
 2. **Объекты** — для каждого `*.xml` в каталогах `Catalogs/`, `Documents/`, …:
    - сравнение `content_hash` с БД (инкрементальность);
-   - при изменении — парсинг, запись markdown, upsert в SQLite.
-3. **Чанки** — для всех объектов конфигурации пересобираются чанки из `.md` (`clear_chunks` → `insert_chunks`).
-4. **Эмбеддинги** — батчами через выбранный провайдер; векторы пишутся в FAISS и `chunk_map.json`.
+   - при изменении — парсинг, запись markdown, upsert в SQLite;
+   - объекты, исчезнувшие из выгрузки, удаляются из БД (CASCADE → chunks).
+3. **Чанки** — пересборка только для изменённых объектов (`_build_chunks_incremental`); при смене `max_tokens`/`overlap_tokens` или флаге `--force` — полная пересборка.
+4. **Эмбеддинги** — кэш в SQLite (`embedding_cache`, ключ `content_hash` + `model`); API вызывается только для cache miss; FAISS пересобирается из собранной матрицы векторов.
 
-Команды: `conf-doc index`, `POST /reindex`, `conf-doc embed` (только шаги 3–4).
+Команды: `conf-doc index`, `POST /reindex`, `conf-doc embed` (только шаги 3–4). Флаг `--force` / `"force": true` — полная пересборка чанков и эмбеддингов.
 
 ## Поток поиска
 
@@ -112,6 +120,7 @@ output/
 | `attributes`, `tabular_sections`, `enum_values` | Структура объектов |
 | `help_pages` | Справка (HTML → markdown) |
 | `chunks` | Текстовые фрагменты для RAG, `vector_id` |
+| `embedding_cache` | Кэш векторов эмбеддингов по `(config_id, content_hash, model)` |
 | `index_runs` | Журнал прогонов индексации |
 
 Связь объектов с конфигурацией: `metadata_objects.config_id → configurations.id`.
@@ -180,6 +189,8 @@ output/vectors/{ConfigurationName}/
 ```json
 {
   "dimension": 1536,
+  "model": "qwen/qwen3-embedding-8b",
+  "built_at": "2026-06-07T12:00:00Z",
   "vector_to_chunk": {
     "0": 36949,
     "1": 36950,
@@ -191,6 +202,8 @@ output/vectors/{ConfigurationName}/
 | Поле | Смысл |
 |------|--------|
 | `dimension` | Размерность вектора (зависит от модели эмбеддингов) |
+| `model` | Модель эмбеддингов, использованная при построении |
+| `built_at` | ISO-время последней сборки индекса |
 | `vector_to_chunk` | Позиция в FAISS (`vector_id`) → `chunks.id` в SQLite |
 
 **Важно:** `vector_id` — это порядковый номер вектора в индексе (0…N−1), а не поле `chunks.vector_id` в БД напрямую. После `build_embeddings` в SQLite записывается `chunks.vector_id = vector_id` для обратной связи.
@@ -222,17 +235,19 @@ scores, indices = index.search(query_vec, top_k)
 - `IndexFlatIP` возвращает скалярное произведение = **cosine similarity** (от −1 до 1; для типичных эмбеддингов текста — положительные значения 0…1).
 - Чем выше `score`, тем ближе смысл чанка к запросу.
 
-### Построение индекса (полная пересборка)
+### Построение индекса (инкрементальные эмбеддинги)
 
 При каждом `build_embeddings`:
 
 1. Из SQLite читаются **все** чанки конфигурации (`get_chunks_for_embedding`), упорядоченные по `chunks.id`.
-2. Тексты батчами отправляются в провайдер эмбеддингов (`embeddings.batch_size`, по умолчанию 32).
-3. Матрица `float32` формы `(N, dimension)` добавляется в **новый** индекс (старый перезаписывается).
-4. Сохраняются `index.faiss` и `chunk_map.json`.
-5. В SQLite обновляется `chunks.vector_id` для каждого чанка.
+2. Для каждого чанка проверяется кэш `embedding_cache` по `(content_hash, model)`; при hit вектор берётся из БД без вызова API.
+3. Только cache miss батчами отправляются в провайдер эмбеддингов (`embeddings.batch_size`, по умолчанию 32); новые векторы сохраняются в кэш.
+4. Матрица `float32` формы `(N, dimension)` собирается из кэша + новых векторов и добавляется в **новый** FAISS-индекс (пересборка быстрая, ~мс для flat / ~15k чанков).
+5. Сохраняются `index.faiss` и `chunk_map.json` (с полями `model`, `built_at`).
+6. В SQLite обновляется `chunks.vector_id` для каждого чанка.
 
-Индекс **не обновляется инкрементально**: после переиндексации чанков (`clear_chunks` + новые `id`) старый FAISS несовместим — нужен `conf-doc embed`.
+Повторный `index` без изменений XML: 0 вызовов API, FAISS rebuild из кэша.  
+Полная пересборка: `conf-doc index --force`, `conf-doc embed --force` или смена модели/chunking-параметров (auto-detect).
 
 ### Поиск
 
