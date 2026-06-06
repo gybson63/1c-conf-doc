@@ -59,6 +59,8 @@ class FaissIndex:
         self.map_path = vectors_dir / "chunk_map.json"
         self._index: faiss.Index | None = None
         self._vector_to_chunk: dict[int, int] = {}
+        self._stored_model: str | None = None
+        self._built_at: str | None = None
 
     def _create_index(self) -> faiss.Index:
         if self.config.index_type == "hnsw":
@@ -79,21 +81,33 @@ class FaissIndex:
         self._index = index
         self._vector_to_chunk = {i: chunk_id for i, chunk_id in enumerate(chunk_ids)}
 
-    def save(self) -> None:
+    def save(self, *, model: str | None = None, built_at: str | None = None) -> None:
         if self._index is None:
             self._index = self._create_index()
         _write_faiss_index(self._index, self.index_path)
         self.vectors_dir.mkdir(parents=True, exist_ok=True)
+        if model is not None:
+            self._stored_model = model
+        if built_at is not None:
+            self._built_at = built_at
+        payload: dict[str, object] = {
+            "dimension": self.dimension,
+            "vector_to_chunk": {str(k): v for k, v in self._vector_to_chunk.items()},
+        }
+        if self._stored_model is not None:
+            payload["model"] = self._stored_model
+        if self._built_at is not None:
+            payload["built_at"] = self._built_at
         with self.map_path.open("w", encoding="utf-8") as fh:
-            json.dump(
-                {
-                    "dimension": self.dimension,
-                    "vector_to_chunk": {str(k): v for k, v in self._vector_to_chunk.items()},
-                },
-                fh,
-                ensure_ascii=False,
-                indent=2,
-            )
+            json.dump(payload, fh, ensure_ascii=False, indent=2)
+
+    @property
+    def stored_model(self) -> str | None:
+        return self._stored_model
+
+    @property
+    def built_at(self) -> str | None:
+        return self._built_at
 
     def load(self) -> bool:
         if not self.index_path.exists() or not self.map_path.exists():
@@ -103,6 +117,10 @@ class FaissIndex:
             data = json.load(fh)
         self.dimension = int(data.get("dimension", self.dimension))
         self._vector_to_chunk = {int(k): int(v) for k, v in data.get("vector_to_chunk", {}).items()}
+        model = data.get("model")
+        self._stored_model = str(model) if model else None
+        built = data.get("built_at")
+        self._built_at = str(built) if built else None
         return True
 
     def search(

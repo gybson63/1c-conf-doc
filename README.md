@@ -67,6 +67,9 @@ conf-doc index
 # Без эмбеддингов (только markdown + SQLite)
 conf-doc index --skip-embeddings
 
+# Полная пересборка чанков и эмбеддингов (игнорировать кэш)
+conf-doc index --force
+
 # Явные пути
 conf-doc index --source ./data/export --output ./output
 
@@ -81,8 +84,11 @@ conf-doc search "отпуск" --full
 conf-doc show Отпуск --type Document
 conf-doc show Отпуск --type Document --chunk 0   # справка
 
-# Пересборка эмбеддингов (после смены модели)
+# Пересборка эмбеддингов (инкрементально из кэша; только cache miss → API)
 conf-doc embed
+
+# Игнорировать кэш, пересчитать все векторы
+conf-doc embed --force
 
 # HTTP API
 conf-doc serve --port 8000
@@ -105,7 +111,7 @@ conf-doc serve --port 8000
 | Endpoint | Описание |
 |----------|----------|
 | `GET /health` | Проверка состояния |
-| `POST /reindex` | Переиндексация (`{"skip_embeddings": false}`) |
+| `POST /reindex` | Переиндексация (`{"skip_embeddings": false, "force": false}`) |
 | `GET /configurations` | Список проиндексированных конфигураций |
 | `GET /objects?type=Catalog&configuration=...` | Поиск объектов в SQLite |
 | `GET /objects/{type}/{name}?configuration=...` | Карточка объекта, список чанков |
@@ -141,7 +147,7 @@ output/
 configuration: ЗарплатаИУправлениеПерсоналомКОРП
 ```
 
-После обновления выполните `conf-doc index` для переноса markdown в каталог с именем конфигурации.
+После обновления выполните `conf-doc index` — при неизменённой выгрузке чанки и эмбеддинги не пересчитываются (используется кэш). Для принудительной пересборки: `--force`.
 
 ## Структура репозитория
 

@@ -10,7 +10,7 @@ import typer
 import uvicorn
 
 from onec_conf_doc.config import AppConfig, load_config
-from onec_conf_doc.rag.pipeline import Pipeline
+from onec_conf_doc.rag.pipeline import IndexStats, Pipeline
 
 if hasattr(sys.stdout, "reconfigure"):
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
@@ -57,6 +57,7 @@ def index_cmd(
     skip_embeddings: Annotated[
         bool, typer.Option(help="Пропустить построение эмбеддингов")
     ] = False,
+    force: Annotated[bool, typer.Option(help="Полная пересборка чанков и эмбеддингов")] = False,
     quiet: Annotated[bool, typer.Option("--quiet", "-q", help="Без индикатора прогресса")] = False,
 ) -> None:
     """Индексировать выгрузку конфигурации."""
@@ -70,6 +71,7 @@ def index_cmd(
     pipeline = Pipeline(cfg)
     stats = pipeline.index_export(
         skip_embeddings=skip_embeddings,
+        force=force,
         show_progress=False if quiet else None,
     )
     typer.echo(f"Конфигурация: {stats.configuration_name}")
@@ -77,7 +79,15 @@ def index_cmd(
         typer.echo(f"Синоним: {stats.configuration_synonym}")
     typer.echo(f"Объектов обработано: {stats.objects_total}")
     typer.echo(f"Обновлено: {stats.objects_updated}, пропущено: {stats.objects_skipped}")
+    if stats.objects_deleted:
+        typer.echo(f"Удалено из выгрузки: {stats.objects_deleted}")
     typer.echo(f"Чанков: {stats.chunks_total}")
+    if stats.chunks_rebuilt:
+        typer.echo(f"Пересобрано объектов (чанки): {stats.chunks_rebuilt}")
+    if stats.embeddings_cached or stats.embeddings_computed:
+        typer.echo(
+            f"Эмбеддинги: из кэша {stats.embeddings_cached}, вычислено {stats.embeddings_computed}"
+        )
 
 
 @app.command("search")
@@ -117,6 +127,7 @@ def search_cmd(
 def embed_cmd(
     configuration: Annotated[str | None, typer.Option(help="Имя конфигурации")] = None,
     config: Annotated[Path | None, typer.Option(help="Путь к config.yaml")] = None,
+    force: Annotated[bool, typer.Option(help="Игнорировать кэш, пересчитать все векторы")] = False,
     quiet: Annotated[bool, typer.Option("--quiet", "-q", help="Без индикатора прогресса")] = False,
 ) -> None:
     """Пересобрать эмбеддинги и FAISS-индекс (без повторного парсинга XML)."""
@@ -125,8 +136,17 @@ def embed_cmd(
     pipeline = Pipeline(cfg)
     active = pipeline.active_configuration
     typer.echo(f"Конфигурация: {active.name} ({active.synonym or active.name})")
-    count = pipeline.rebuild_embeddings(show_progress=False if quiet else None)
+    stats = IndexStats()
+    count = pipeline.rebuild_embeddings(
+        show_progress=False if quiet else None,
+        force=force,
+        stats=stats,
+    )
     typer.echo(f"Готово: {count} векторов → {cfg.vectors_dir_for(active.name)}")
+    if stats.embeddings_cached or stats.embeddings_computed:
+        typer.echo(
+            f"Эмбеддинги: из кэша {stats.embeddings_cached}, вычислено {stats.embeddings_computed}"
+        )
 
 
 @app.command("show")
