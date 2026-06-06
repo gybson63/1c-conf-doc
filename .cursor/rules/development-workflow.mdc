@@ -1,0 +1,86 @@
+---
+description: Правила разработки — ветки, ruff/mypy, changelog, PR
+alwaysApply: true
+---
+
+# Workflow разработки
+
+## 1. Ветка перед изменениями
+
+Перед любыми правками создайте feature-ветку от актуальной базовой ветки:
+
+```bash
+git fetch origin
+git checkout main
+git pull origin main
+git checkout -b <тип>/<краткое-описание>
+```
+
+Именование веток: `feature/...`, `fix/...`, `docs/...`, `chore/...`.
+
+Не вносите изменения напрямую в `main`.
+
+## 2. Проверки перед коммитом
+
+Перед `git commit` запустите и исправьте все замечания:
+
+```bash
+ruff check .
+ruff format .
+mypy src
+```
+
+Коммит допустим только при нулевых ошибках ruff и mypy.
+
+Pre-commit hooks дублируют эти проверки автоматически. Установка (один раз):
+
+```bash
+pip install -e ".[dev]"
+pre-commit install
+pre-commit install --hook-type commit-msg
+```
+
+## 3. Changelog
+
+Каждое логическое изменение фиксируйте в `CHANGELOG.md` (формат [Keep a Changelog](https://keepachangelog.com/ru/)):
+
+- секция `[Unreleased]` в начале файла;
+- категории: `Added`, `Changed`, `Fixed`, `Removed`;
+- краткое описание «что и зачем», не список файлов.
+
+Обновление changelog — часть той же задачи, что и код; не откладывайте на потом.
+
+## 4. Conventional Commits
+
+Сообщения коммитов — в формате [Conventional Commits](https://www.conventionalcommits.org/ru/):
+
+```
+<тип>[optional scope]: <краткое описание>
+```
+
+Типы: `feat`, `fix`, `docs`, `chore`, `refactor`, `test`, `ci`.
+
+Примеры:
+
+```
+feat: добавить парсер метаданных конфигурации
+fix: исправить кодировку имён объектов
+docs: описать формат выходных файлов
+chore: обновить зависимости ruff
+```
+
+Hook `conventional-pre-commit` проверяет формат при коммите.
+
+## 5. Pull Request
+
+Изменения попадают в `main` только через Pull Request:
+
+1. Запушьте feature-ветку: `git push -u origin <ветка>`.
+2. Создайте PR в `main` через GitHub (`gh pr create`).
+3. В описании PR укажите суть изменений и соответствующий пункт из `CHANGELOG.md`.
+4. Дождитесь прохождения проверок на GitHub и ревью.
+5. Не мержите в `main` напрямую с локальной машины.
+
+## Коммиты
+
+Коммиты создавайте только по явной просьбе пользователя. Перед коммитом убедитесь, что выполнены пункты 2–3.
