@@ -1,5 +1,5 @@
 ---
-description: Правила разработки — ветки, ruff/mypy, changelog, PR
+description: Правила разработки — ветки, ruff/mypy, changelog, PR, релизы
 alwaysApply: true
 ---
 
@@ -16,7 +16,7 @@ git pull origin main
 git checkout -b <тип>/<краткое-описание>
 ```
 
-Именование веток: `feature/...`, `fix/...`, `docs/...`, `chore/...`.
+Именование веток: `feature/...`, `fix/...`, `docs/...`, `chore/...`, `release/...`.
 
 Не вносите изменения напрямую в `main`.
 
@@ -44,7 +44,7 @@ pre-commit install --hook-type commit-msg
 
 Каждое логическое изменение фиксируйте в `CHANGELOG.md` (формат [Keep a Changelog](https://keepachangelog.com/ru/)):
 
-- секция `[Unreleased]` в начале файла;
+- секция `[Unreleased]` в начале файла — накопление изменений между релизами;
 - категории: `Added`, `Changed`, `Fixed`, `Removed`;
 - краткое описание «что и зачем», не список файлов.
 
@@ -66,7 +66,7 @@ pre-commit install --hook-type commit-msg
 feat: добавить парсер метаданных конфигурации
 fix: исправить кодировку имён объектов
 docs: описать формат выходных файлов
-chore: обновить зависимости ruff
+chore(release): v0.2.0
 ```
 
 Hook `conventional-pre-commit` проверяет формат при коммите.
@@ -76,11 +76,49 @@ Hook `conventional-pre-commit` проверяет формат при комми
 Изменения попадают в `main` только через Pull Request:
 
 1. Запушьте feature-ветку: `git push -u origin <ветка>`.
-2. Создайте PR в `main` через GitHub (`gh pr create`).
+2. Создайте PR в `main` через GitHub.
 3. В описании PR укажите суть изменений и соответствующий пункт из `CHANGELOG.md`.
 4. Дождитесь прохождения проверок на GitHub и ревью.
 5. Не мержите в `main` напрямую с локальной машины.
 
+## 6. Релизы
+
+Публикация изменений — только через **версионированные релизы** (SemVer + GitHub Releases), а не просто merge в `main`.
+
+**Единый источник версии:** поле `version` в `pyproject.toml`. Код читает его через `onec_conf_doc.__version__`.
+
+**Когда выпускать:**
+
+- `MAJOR` — несовместимые изменения CLI/API;
+- `MINOR` — новая функциональность с обратной совместимостью;
+- `PATCH` — исправления без новых возможностей.
+
+**Процесс релиза (только из `main`):**
+
+```bash
+git checkout main
+git pull origin main
+python scripts/release.py check
+python scripts/release.py prepare 0.2.0
+git add CHANGELOG.md pyproject.toml
+git commit -m "chore(release): v0.2.0"
+git tag -a v0.2.0 -m "Release v0.2.0"
+git push origin main
+git push origin v0.2.0
+```
+
+`prepare` переносит `[Unreleased]` в секцию `[X.Y.Z] - дата`, обнуляет `[Unreleased]` и обновляет версию в `pyproject.toml`.
+
+Push тега `v*.*.*` запускает GitHub Actions (`.github/workflows/release.yml`) — создаётся [GitHub Release](https://github.com/gybson63/1c-conf-doc/releases) с текстом из changelog.
+
+Проверить текст заметок локально:
+
+```bash
+python scripts/release.py notes 0.2.0
+```
+
 ## Коммиты
 
 Коммиты создавайте только по явной просьбе пользователя. Перед коммитом убедитесь, что выполнены пункты 2–3.
+
+Релизный коммит и тег — только по явной просьбе пользователя.

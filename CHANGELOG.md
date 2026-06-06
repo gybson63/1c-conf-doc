@@ -5,6 +5,8 @@
 Формат основан на [Keep a Changelog](https://keepachangelog.com/ru/1.1.0/),
 версионирование — [Semantic Versioning](https://semver.org/lang/ru/).
 
+Опубликованные версии — в [GitHub Releases](https://github.com/gybson63/1c-conf-doc/releases).
+
 ## [Unreleased]
 
 ### Added
@@ -28,3 +30,8 @@
 
 - Поток индексации: удаление объектов, исчезнувших из XML-выгрузки; расширенный `embedding_status()`.
 - Базовая ветка разработки: `main` (отслеживает `origin/main`).
+
+### Added
+
+- Процесс версионированных релизов: `scripts/release.py`, GitHub Actions `release.yml`.
+- Единый источник версии через `pyproject.toml` и `onec_conf_doc._version`.
