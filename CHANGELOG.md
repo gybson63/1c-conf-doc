@@ -11,6 +11,16 @@
 
 ### Added
 
+### Changed
+
+### Fixed
+
+### Removed
+
+## [0.2.0] - 2026-06-07
+
+### Added
+
 - Инкрементальная пересборка чанков: только для изменённых или удалённых объектов; повторный `index` без изменений сохраняет `chunks.id`.
 - Кэш эмбеддингов в SQLite (`embedding_cache`): ключ `(config_id, content_hash, model)`; API вызывается только для cache miss.
 - Инкрементальный `build_embeddings`: сбор FAISS из кэша + новых векторов; счётчики `embeddings_cached` / `embeddings_computed`.
