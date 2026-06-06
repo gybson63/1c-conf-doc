@@ -1,0 +1,20 @@
+---
+description: >-
+  Поиск по документации конфигурации 1С через удалённый conf-doc HTTP API.
+  Применять при search/query по метаданным ЗУП/1C. Не использовать локальные
+  output/ и CLI, если доступ только к API.
+alwaysApply: false
+---
+
+# conf-doc: поиск (API)
+
+Прочитай skill: `skills/conf-doc-search/SKILL.md`
+
+**Доступ к базе — только через HTTP API** (`CONF_DOC_API_URL`). Не читай `output/` и не вызывай локальный CLI без явного указания пользователя.
+
+## Workflow
+
+1. `GET /configurations` — имя configuration  
+2. `POST /search` — обзор (`full: true` для полного текста)  
+3. `GET /objects/{type}/{name}` — список чанков  
+4. `GET /objects/{type}/{name}/chunks/{N}` — детали (реквизиты, справка)
