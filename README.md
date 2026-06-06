@@ -153,6 +153,7 @@ src/onec_conf_doc/       # исходный код
 tests/
 config.example.yaml
 AGENTS.md                  # инструкции для AI-агентов
+ARCHITECTURE.md            # архитектура проекта
 ```
 
 ## Cursor Agent
@@ -164,6 +165,8 @@ AGENTS.md                  # инструкции для AI-агентов
 | [.cursor/rules/conf-doc-search.mdc](.cursor/rules/conf-doc-search.mdc) | Правило: когда применять skill |
 
 Skill `conf-doc-search` — поиск и углубление в документации 1С. Клонируйте репозиторий — skill доступен в `skills/`.
+
+Подробное описание компонентов, потоков данных и API: [ARCHITECTURE.md](ARCHITECTURE.md).
 
 ## Разработка
 
