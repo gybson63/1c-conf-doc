@@ -1,3 +1,5 @@
 """Документация из конфигурации 1С."""
 
-__version__ = "0.1.0"
+from onec_conf_doc._version import __version__
+
+__all__ = ["__version__"]

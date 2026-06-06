@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+from onec_conf_doc import __version__
 from onec_conf_doc.api.routes import create_router
 from onec_conf_doc.config import AppConfig
 from onec_conf_doc.rag.pipeline import Pipeline
@@ -19,7 +20,7 @@ def create_app(config: AppConfig) -> FastAPI:
     app = FastAPI(
         title="1c-conf-doc",
         description="Справочная информация конфигурации 1С и RAG-поиск",
-        version="0.1.0",
+        version=__version__,
     )
     app.state.config = config
     app.state.pipeline = pipeline
