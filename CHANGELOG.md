@@ -9,6 +9,10 @@
 
 ### Added
 
+- API: `GET /objects/{type}/{name}` и `GET /objects/{type}/{name}/chunks/{index}` — карточка объекта и текст чанка для удалённого доступа.
+- Параметр `full` в `POST /search` (полный текст чанка, аналог CLI `--full`).
+- Cursor skill `conf-doc-search` в каталоге `skills/conf-doc-search/` — workflow через HTTP API.
+- `AGENTS.md` и правило `.cursor/rules/conf-doc-search.mdc` для AI-агентов.
 - Правила разработки в `.cursor/rules/development-workflow.mdc`.
 - Конфигурация `pyproject.toml` для ruff и mypy.
 - Pre-commit hooks: ruff, ruff-format, mypy, conventional commits.

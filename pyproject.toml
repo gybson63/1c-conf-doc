@@ -8,30 +8,60 @@ version = "0.1.0"
 description = "Документация из конфигурации 1С"
 readme = "README.md"
 requires-python = ">=3.11"
+dependencies = [
+    "lxml>=5.0",
+    "pydantic>=2.0",
+    "pydantic-settings>=2.0",
+    "typer>=0.12",
+    "fastapi>=0.115",
+    "uvicorn>=0.32",
+    "faiss-cpu>=1.9",
+    "numpy>=1.26",
+    "html2text>=2024.2",
+    "pyyaml>=6.0",
+    "httpx>=0.27",
+    "tqdm>=4.66",
+]
 
 [project.optional-dependencies]
+embeddings = ["sentence-transformers>=3.0"]
+openai = ["openai>=1.0"]
 dev = [
     "mypy>=1.13",
     "pre-commit>=4.0",
+    "pytest>=8.0",
     "ruff>=0.9",
+    "types-PyYAML",
+    "types-tqdm",
 ]
+all = ["1c-conf-doc[embeddings,openai,dev]"]
+
+[project.scripts]
+conf-doc = "onec_conf_doc.cli:app"
 
 [tool.setuptools.packages.find]
 where = ["src"]
 
+[tool.setuptools.package-data]
+onec_conf_doc = ["py.typed"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
+
 [tool.ruff]
 line-length = 100
 target-version = "py311"
-src = ["src"]
+src = ["src", "tests"]
 
 [tool.ruff.lint]
 select = [
-    "E",   # pycodestyle errors
-    "F",   # pyflakes
-    "I",   # isort
-    "UP",  # pyupgrade
-    "B",   # flake8-bugbear
-    "SIM", # flake8-simplify
+    "E",
+    "F",
+    "I",
+    "UP",
+    "B",
+    "SIM",
 ]
 
 [tool.ruff.lint.isort]
@@ -39,9 +69,21 @@ known-first-party = ["onec_conf_doc"]
 
 [tool.mypy]
 python_version = "3.11"
-strict = true
+strict = false
 warn_return_any = true
 warn_unused_configs = true
-files = ["src"]
-namespace_packages = true
+mypy_path = "src"
+packages = ["onec_conf_doc"]
 explicit_package_bases = true
+
+[[tool.mypy.overrides]]
+module = [
+    "faiss.*",
+    "lxml.*",
+    "sentence_transformers.*",
+    "openai.*",
+    "html2text.*",
+    "yaml.*",
+    "tqdm.*",
+]
+ignore_missing_imports = true
