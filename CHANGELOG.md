@@ -11,6 +11,7 @@
 
 ### Added
 
+- Pre-commit hook `check-changelog`: при изменениях кода в `src/onec_conf_doc/` требует обновление `CHANGELOG.md`.
 - Документация [docs/DOCKER_UPDATE.md](docs/DOCKER_UPDATE.md) — процедура обновления Docker-контейнера после значимых изменений.
 - Docker: `Dockerfile`, `docker-compose.yml`, `config.docker.example.yaml` — backend для MCP.
 - Готовый [`.cursor/mcp.json`](.cursor/mcp.json) и launcher'ы `scripts/mcp.cmd` / `scripts/mcp.sh`.
@@ -24,6 +25,8 @@
 - Документация: раздел «Поиск и RAG» (README, ARCHITECTURE, skill) — embeddings vs LLM, настройка `llm.provider`, когда нужен `/query`.
 
 ### Fixed
+
+- Парсер XML: измерения и ресурсы регистров (`Dimension`, `Resource`) попадают в индекс, markdown и `odata_fields` (раньше карточка IR была пустой).
 
 ### Removed
 

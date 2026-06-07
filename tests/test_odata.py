@@ -39,3 +39,34 @@ def test_build_odata_fields_payload() -> None:
     assert payload["fields"][0]["name"] == "Организация"
     assert payload["fields"][0]["required"] is True
     assert payload["tabular_sections"][0]["fields"][0]["kind"] == "tabular_attribute"
+
+
+def test_build_odata_fields_payload_register() -> None:
+    payload = build_odata_fields_payload(
+        "InformationRegister",
+        "КадроваяИсторияСотрудников",
+        attributes=[],
+        tabular_sections=[],
+        dimensions=[
+            {
+                "name": "Сотрудник",
+                "type_repr": "CatalogRef.Сотрудники",
+                "synonym": "Сотрудник",
+                "comment": "",
+                "is_required": False,
+            }
+        ],
+        resources=[
+            {
+                "name": "Комментарий",
+                "type_repr": "xs:string",
+                "synonym": "Комментарий",
+                "comment": "",
+                "is_required": False,
+            }
+        ],
+    )
+    assert payload["entity_type"] == "InformationRegister_КадроваяИсторияСотрудников"
+    kinds = {f["name"]: f["kind"] for f in payload["fields"]}
+    assert kinds["Сотрудник"] == "dimension"
+    assert kinds["Комментарий"] == "resource"

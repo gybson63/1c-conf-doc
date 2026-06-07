@@ -33,20 +33,46 @@ def build_odata_fields_payload(
     name: str,
     attributes: list[dict[str, Any]],
     tabular_sections: list[dict[str, Any]],
+    *,
+    dimensions: list[dict[str, Any]] | None = None,
+    resources: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
-    return {
-        "entity_type": odata_entity_type(object_type, name),
-        "fields": [
+    fields = [
+        _field_dict(
+            name=str(row["name"]),
+            type_repr=str(row.get("type_repr", "")),
+            synonym=str(row.get("synonym", "")),
+            comment=str(row.get("comment", "")),
+            is_required=bool(row.get("is_required")),
+            kind="attribute",
+        )
+        for row in attributes
+    ]
+    for row in dimensions or []:
+        fields.append(
             _field_dict(
                 name=str(row["name"]),
                 type_repr=str(row.get("type_repr", "")),
                 synonym=str(row.get("synonym", "")),
                 comment=str(row.get("comment", "")),
                 is_required=bool(row.get("is_required")),
-                kind="attribute",
+                kind="dimension",
             )
-            for row in attributes
-        ],
+        )
+    for row in resources or []:
+        fields.append(
+            _field_dict(
+                name=str(row["name"]),
+                type_repr=str(row.get("type_repr", "")),
+                synonym=str(row.get("synonym", "")),
+                comment=str(row.get("comment", "")),
+                is_required=bool(row.get("is_required")),
+                kind="resource",
+            )
+        )
+    return {
+        "entity_type": odata_entity_type(object_type, name),
+        "fields": fields,
         "tabular_sections": [
             {
                 "name": str(section["name"]),

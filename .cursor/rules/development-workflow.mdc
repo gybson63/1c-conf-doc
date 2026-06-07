@@ -40,6 +40,8 @@ pre-commit install
 pre-commit install --hook-type commit-msg
 ```
 
+Hook `check-changelog`: при изменениях в `src/onec_conf_doc/` в том же коммите должен быть diff в `CHANGELOG.md` (секция `[Unreleased]`).
+
 ## 3. Changelog
 
 Каждое логическое изменение фиксируйте в `CHANGELOG.md` (формат [Keep a Changelog](https://keepachangelog.com/ru/)):

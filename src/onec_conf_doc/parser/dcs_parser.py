@@ -52,7 +52,9 @@ def _collect_queries_from_node(node: etree._Element, queries: list[DcsQuery]) ->
         return
 
     if local == "item":
-        _collect_queries_from_node(node, queries)
+        for child in node:
+            _collect_queries_from_node(child, queries)
+        return
 
 
 def extract_dcs_queries(path: Path) -> list[DcsQuery]:

@@ -22,9 +22,9 @@ def test_api_health_and_objects(tmp_path) -> None:
 
     reindex_force = client.post("/reindex", json={"skip_embeddings": True, "force": True})
     assert reindex_force.status_code == 200
-    assert reindex_force.json()["chunks_rebuilt"] == 3
+    assert reindex_force.json()["chunks_rebuilt"] == 5
     assert reindex.json()["configuration_name"] == "ТестоваяКонфигурация"
-    assert reindex.json()["objects_total"] == 3
+    assert reindex.json()["objects_total"] == 5
 
     objects = client.get(
         "/objects",

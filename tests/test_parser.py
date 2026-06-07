@@ -13,6 +13,7 @@ def test_scan_export_finds_objects() -> None:
     assert ("Document", "РеализацияТоваров") in names
     assert ("Enum", "ВидыОпераций") in names
     assert ("Report", "ТестовыйОтчет") in names
+    assert ("InformationRegister", "КадроваяИсторияСотрудников") in names
 
 
 def test_parse_catalog() -> None:
@@ -69,3 +70,24 @@ def test_parse_configuration() -> None:
     assert info.name == "ТестоваяКонфигурация"
     assert info.synonym == "Тестовая конфигурация"
     assert info.version == "1.0.0.1"
+
+
+def test_parse_information_register() -> None:
+    path = FIXTURES / "InformationRegisters" / "КадроваяИсторияСотрудников.xml"
+    obj = parse_metadata_file(path, "InformationRegister", source_root=FIXTURES)
+    assert obj.name == "КадроваяИсторияСотрудников"
+    assert obj.synonym == "Кадровая история сотрудников"
+    assert obj.register_periodicity == "Second"
+    assert obj.register_write_mode == "RecorderSubordinate"
+    assert len(obj.dimensions) == 5
+    dim_names = {d.name for d in obj.dimensions}
+    assert dim_names == {
+        "Сотрудник",
+        "Подразделение",
+        "Должность",
+        "ВидСобытия",
+        "ГоловнаяОрганизация",
+    }
+    assert obj.dimensions[0].type_repr == "CatalogRef.Сотрудники"
+    assert obj.attributes == []
+    assert obj.resources == []

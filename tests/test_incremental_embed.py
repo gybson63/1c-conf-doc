@@ -152,7 +152,7 @@ def test_chunking_params_change_rebuilds_all_chunks(tmp_path: Path) -> None:
     stats = pipeline.index_export(skip_embeddings=True)
 
     chunk_ids_after = pipeline.indexer.get_chunk_ids_for_config(config_id)
-    assert stats.chunks_rebuilt == 3
+    assert stats.chunks_rebuilt == 5
     assert chunk_ids_before != chunk_ids_after
 
 

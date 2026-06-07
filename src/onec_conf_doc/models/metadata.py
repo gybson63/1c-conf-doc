@@ -56,6 +56,10 @@ class MetadataObject(BaseModel):
     source_xml: str = ""
     content_hash: str = ""
     attributes: list[Attribute] = Field(default_factory=list)
+    dimensions: list[Attribute] = Field(default_factory=list)
+    resources: list[Attribute] = Field(default_factory=list)
+    register_periodicity: str = ""
+    register_write_mode: str = ""
     tabular_sections: list[TabularSection] = Field(default_factory=list)
     enum_values: list[EnumValue] = Field(default_factory=list)
     forms: list[FormRef] = Field(default_factory=list)

@@ -229,12 +229,25 @@ def parse_metadata_file(
 
     child_objects = obj_elem.find("md:ChildObjects", NS)
     attributes: list[Attribute] = []
+    dimensions: list[Attribute] = []
+    resources: list[Attribute] = []
     tabular_sections: list[TabularSection] = []
     if child_objects is not None:
         for attr_node in child_objects.findall("md:Attribute", NS):
             attributes.append(_parse_attribute(attr_node))
+        for dim_node in child_objects.findall("md:Dimension", NS):
+            dimensions.append(_parse_attribute(dim_node))
+        for res_node in child_objects.findall("md:Resource", NS):
+            resources.append(_parse_attribute(res_node))
         for ts_node in child_objects.findall("md:TabularSection", NS):
             tabular_sections.append(_parse_tabular_section(ts_node))
+
+    resolved_type = object_type or tag
+    register_periodicity = ""
+    register_write_mode = ""
+    if resolved_type == "InformationRegister":
+        register_periodicity = _text(props.find("md:InformationRegisterPeriodicity", NS))
+        register_write_mode = _text(props.find("md:WriteMode", NS))
 
     name = _text(props.find("md:Name", NS)) or path.stem
     explanation = _text(props.find("md:Explanation", NS))
@@ -250,20 +263,24 @@ def parse_metadata_file(
                     help_pages.append(_parse_help_content(help_path))
 
     obj = MetadataObject(
-        object_type=object_type or tag,
+        object_type=resolved_type,
         name=name,
         synonym=_synonym(props),
         comment=_text(props.find("md:Comment", NS)),
         uuid=obj_elem.get("uuid", ""),
         source_xml=str(path),
         attributes=attributes,
+        dimensions=dimensions,
+        resources=resources,
+        register_periodicity=register_periodicity,
+        register_write_mode=register_write_mode,
         tabular_sections=tabular_sections,
         enum_values=_parse_enum_values(child_objects),
         forms=_parse_forms(child_objects),
         help_pages=help_pages,
     )
 
-    if (object_type or tag) == "Report" and source_root is not None:
+    if resolved_type == "Report" and source_root is not None:
         report_dir = object_subdirectory(source_root, "Report", name)
         if report_dir is not None:
             obj.object_module = read_object_module(report_dir)

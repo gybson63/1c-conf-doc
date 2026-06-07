@@ -32,6 +32,18 @@ def test_generate_markdown_report_sections() -> None:
     assert "Справочник.Номенклатура" in md
 
 
+def test_generate_markdown_information_register() -> None:
+    path = FIXTURES / "InformationRegisters" / "КадроваяИсторияСотрудников.xml"
+    obj = parse_metadata_file(path, "InformationRegister", source_root=FIXTURES)
+    md = generate_markdown(obj)
+    assert "# Регистр сведений: КадроваяИсторияСотрудников" in md
+    assert "**Периодичность:** Second" in md
+    assert "**Режим записи:** RecorderSubordinate" in md
+    assert "## Измерения" in md
+    assert "Сотрудник" in md
+    assert "ГоловнаяОрганизация" in md
+
+
 def test_write_markdown_catalog(tmp_path: Path) -> None:
     path = FIXTURES / "Catalogs" / "Номенклатура.xml"
     obj = parse_metadata_file(path, "Catalog", source_root=FIXTURES)
@@ -51,8 +63,8 @@ def test_index_pipeline_without_embeddings(tmp_path: Path) -> None:
     pipeline = Pipeline(cfg)
     stats = pipeline.index_export(skip_embeddings=True)
 
-    assert stats.objects_total == 4
-    assert stats.objects_updated == 4
+    assert stats.objects_total == 5
+    assert stats.objects_updated == 5
     assert stats.configuration_name == "ТестоваяКонфигурация"
     assert (
         tmp_path / "output" / "docs" / "ТестоваяКонфигурация" / "catalogs" / "Номенклатура.md"
@@ -60,10 +72,10 @@ def test_index_pipeline_without_embeddings(tmp_path: Path) -> None:
     assert cfg.db_path.exists()
 
     objects = pipeline.indexer.list_objects(config_id=pipeline.active_configuration.id)
-    assert len(objects) == 4
+    assert len(objects) == 5
 
     stats2 = pipeline.index_export(skip_embeddings=True)
-    assert stats2.objects_skipped == 4
+    assert stats2.objects_skipped == 5
     assert stats2.objects_updated == 0
     assert stats2.chunks_rebuilt == 0
 

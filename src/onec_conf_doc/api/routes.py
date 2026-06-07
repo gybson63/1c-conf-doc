@@ -137,6 +137,8 @@ def create_router() -> APIRouter:
                         obj_name,
                         fields_data["attributes"],  # type: ignore[arg-type]
                         fields_data["tabular_sections"],  # type: ignore[arg-type]
+                        dimensions=fields_data.get("dimensions"),  # type: ignore[arg-type]
+                        resources=fields_data.get("resources"),  # type: ignore[arg-type]
                     )
         return results
 

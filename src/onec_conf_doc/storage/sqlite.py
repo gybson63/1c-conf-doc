@@ -314,6 +314,44 @@ class SQLiteIndexer:
                     ),
                 )
 
+            for dim in obj.dimensions:
+                conn.execute(
+                    """
+                    INSERT INTO attributes (
+                        object_id, name, type_repr, synonym, comment,
+                        is_required, parent_kind, parent_name
+                    )
+                    VALUES (?, ?, ?, ?, ?, ?, 'dimension', '')
+                    """,
+                    (
+                        object_id,
+                        dim.name,
+                        dim.type_repr,
+                        dim.synonym,
+                        dim.comment,
+                        int(dim.is_required),
+                    ),
+                )
+
+            for res in obj.resources:
+                conn.execute(
+                    """
+                    INSERT INTO attributes (
+                        object_id, name, type_repr, synonym, comment,
+                        is_required, parent_kind, parent_name
+                    )
+                    VALUES (?, ?, ?, ?, ?, ?, 'resource', '')
+                    """,
+                    (
+                        object_id,
+                        res.name,
+                        res.type_repr,
+                        res.synonym,
+                        res.comment,
+                        int(res.is_required),
+                    ),
+                )
+
             for ts in obj.tabular_sections:
                 conn.execute(
                     """
@@ -802,6 +840,26 @@ class SQLiteIndexer:
                 (object_id,),
             ).fetchall()
 
+            dimensions = conn.execute(
+                """
+                SELECT name, type_repr, synonym, comment, is_required
+                FROM attributes
+                WHERE object_id = ? AND parent_kind = 'dimension'
+                ORDER BY id
+                """,
+                (object_id,),
+            ).fetchall()
+
+            resources = conn.execute(
+                """
+                SELECT name, type_repr, synonym, comment, is_required
+                FROM attributes
+                WHERE object_id = ? AND parent_kind = 'resource'
+                ORDER BY id
+                """,
+                (object_id,),
+            ).fetchall()
+
             tabular_rows = conn.execute(
                 """
                 SELECT name, synonym, comment
@@ -853,6 +911,26 @@ class SQLiteIndexer:
                     "is_required": bool(a["is_required"]),
                 }
                 for a in attributes
+            ],
+            "dimensions": [
+                {
+                    "name": str(d["name"]),
+                    "type_repr": str(d["type_repr"] or ""),
+                    "synonym": str(d["synonym"] or ""),
+                    "comment": str(d["comment"] or ""),
+                    "is_required": bool(d["is_required"]),
+                }
+                for d in dimensions
+            ],
+            "resources": [
+                {
+                    "name": str(r["name"]),
+                    "type_repr": str(r["type_repr"] or ""),
+                    "synonym": str(r["synonym"] or ""),
+                    "comment": str(r["comment"] or ""),
+                    "is_required": bool(r["is_required"]),
+                }
+                for r in resources
             ],
             "tabular_sections": tabular_sections,
         }

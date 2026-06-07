@@ -10,6 +10,7 @@ from onec_conf_doc.markdown.templates import (
     type_label,
 )
 from onec_conf_doc.models.metadata import MetadataObject
+from onec_conf_doc.parser.type_registry import REGISTER_TYPES
 from onec_conf_doc.storage.paths import md_path_for_object
 
 
@@ -33,6 +34,11 @@ def generate_markdown(
         lines.append(f"**Синоним:** {obj.synonym}  ")
     if obj.comment:
         lines.append(f"**Комментарий:** {obj.comment}  ")
+    if obj.object_type in REGISTER_TYPES:
+        if obj.register_periodicity:
+            lines.append(f"**Периодичность:** {obj.register_periodicity}  ")
+        if obj.register_write_mode:
+            lines.append(f"**Режим записи:** {obj.register_write_mode}  ")
     lines.extend(
         [
             f"**Тип:** {obj.object_type}  ",
@@ -40,6 +46,12 @@ def generate_markdown(
             "",
         ]
     )
+
+    if obj.dimensions:
+        lines.extend(["## Измерения", "", format_attributes_table(obj.dimensions)])
+
+    if obj.resources:
+        lines.extend(["## Ресурсы", "", format_attributes_table(obj.resources)])
 
     if obj.attributes:
         lines.extend(["## Реквизиты", "", format_attributes_table(obj.attributes)])
