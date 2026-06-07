@@ -61,6 +61,51 @@ def find_help_files(object_dir: Path) -> list[Path]:
     return list(unique.values())
 
 
+def read_object_module(object_dir: Path) -> str:
+    """Read Ext/ObjectModule.bsl from a metadata object subdirectory."""
+    module_path = object_dir / "Ext" / "ObjectModule.bsl"
+    if not module_path.is_file():
+        return ""
+    return module_path.read_text(encoding="utf-8", errors="replace").strip()
+
+
+def template_name_from_dcs_ref(main_dcs_ref: str) -> str:
+    marker = "Template."
+    if marker not in main_dcs_ref:
+        return ""
+    return main_dcs_ref.rsplit(marker, maxsplit=1)[-1].strip()
+
+
+def resolve_main_dcs_template(object_dir: Path, main_dcs_ref: str) -> Path | None:
+    """Resolve path to main DataCompositionSchema Template.xml body."""
+    from lxml import etree
+
+    template_name = template_name_from_dcs_ref(main_dcs_ref)
+    if not template_name:
+        return None
+
+    meta_path = object_dir / "Templates" / f"{template_name}.xml"
+    if not meta_path.is_file():
+        return None
+
+    try:
+        root = etree.parse(str(meta_path)).getroot()
+    except etree.XMLSyntaxError:
+        return None
+
+    template_type = ""
+    for elem in root.iter():
+        if etree.QName(elem).localname == "TemplateType":
+            template_type = (elem.text or "").strip()
+            break
+
+    if template_type != "DataCompositionSchema":
+        return None
+
+    body_path = object_dir / "Templates" / template_name / "Ext" / "Template.xml"
+    return body_path if body_path.is_file() else None
+
+
 def object_subdirectory(source: Path, object_type: str, name: str) -> Path | None:
     from onec_conf_doc.parser.type_registry import TYPE_TO_FOLDER
 

@@ -314,6 +314,44 @@ class SQLiteIndexer:
                     ),
                 )
 
+            for dim in obj.dimensions:
+                conn.execute(
+                    """
+                    INSERT INTO attributes (
+                        object_id, name, type_repr, synonym, comment,
+                        is_required, parent_kind, parent_name
+                    )
+                    VALUES (?, ?, ?, ?, ?, ?, 'dimension', '')
+                    """,
+                    (
+                        object_id,
+                        dim.name,
+                        dim.type_repr,
+                        dim.synonym,
+                        dim.comment,
+                        int(dim.is_required),
+                    ),
+                )
+
+            for res in obj.resources:
+                conn.execute(
+                    """
+                    INSERT INTO attributes (
+                        object_id, name, type_repr, synonym, comment,
+                        is_required, parent_kind, parent_name
+                    )
+                    VALUES (?, ?, ?, ?, ?, ?, 'resource', '')
+                    """,
+                    (
+                        object_id,
+                        res.name,
+                        res.type_repr,
+                        res.synonym,
+                        res.comment,
+                        int(res.is_required),
+                    ),
+                )
+
             for ts in obj.tabular_sections:
                 conn.execute(
                     """
@@ -763,6 +801,138 @@ class SQLiteIndexer:
             "chunks": [dict(r) for r in chunks],
             "attributes_count": int(attr_count),
             "tabular_sections_count": int(ts_count),
+        }
+
+    def get_object_fields(
+        self,
+        object_type: str,
+        name: str,
+        *,
+        config_id: int | None = None,
+        configuration_name: str | None = None,
+    ) -> dict[str, object] | None:
+        with self.connect() as conn:
+            sql = """
+                SELECT o.id
+                FROM metadata_objects o
+                JOIN configurations cfg ON cfg.id = o.config_id
+                WHERE o.object_type = ? AND o.name = ?
+            """
+            params: list[object] = [object_type, name]
+            if config_id is not None:
+                sql += " AND o.config_id = ?"
+                params.append(config_id)
+            elif configuration_name:
+                sql += " AND cfg.name = ?"
+                params.append(configuration_name)
+            row = conn.execute(sql, params).fetchone()
+            if row is None:
+                return None
+            object_id = int(row["id"])
+
+            attributes = conn.execute(
+                """
+                SELECT name, type_repr, synonym, comment, is_required
+                FROM attributes
+                WHERE object_id = ? AND parent_kind = 'object'
+                ORDER BY id
+                """,
+                (object_id,),
+            ).fetchall()
+
+            dimensions = conn.execute(
+                """
+                SELECT name, type_repr, synonym, comment, is_required
+                FROM attributes
+                WHERE object_id = ? AND parent_kind = 'dimension'
+                ORDER BY id
+                """,
+                (object_id,),
+            ).fetchall()
+
+            resources = conn.execute(
+                """
+                SELECT name, type_repr, synonym, comment, is_required
+                FROM attributes
+                WHERE object_id = ? AND parent_kind = 'resource'
+                ORDER BY id
+                """,
+                (object_id,),
+            ).fetchall()
+
+            tabular_rows = conn.execute(
+                """
+                SELECT name, synonym, comment
+                FROM tabular_sections
+                WHERE object_id = ?
+                ORDER BY id
+                """,
+                (object_id,),
+            ).fetchall()
+
+            tabular_sections: list[dict[str, object]] = []
+            for ts in tabular_rows:
+                ts_name = str(ts["name"])
+                ts_attrs = conn.execute(
+                    """
+                    SELECT name, type_repr, synonym, comment, is_required
+                    FROM attributes
+                    WHERE object_id = ? AND parent_kind = 'tabular_section'
+                      AND parent_name = ?
+                    ORDER BY id
+                    """,
+                    (object_id, ts_name),
+                ).fetchall()
+                tabular_sections.append(
+                    {
+                        "name": ts_name,
+                        "synonym": str(ts["synonym"] or ""),
+                        "comment": str(ts["comment"] or ""),
+                        "attributes": [
+                            {
+                                "name": str(a["name"]),
+                                "type_repr": str(a["type_repr"] or ""),
+                                "synonym": str(a["synonym"] or ""),
+                                "comment": str(a["comment"] or ""),
+                                "is_required": bool(a["is_required"]),
+                            }
+                            for a in ts_attrs
+                        ],
+                    }
+                )
+
+        return {
+            "attributes": [
+                {
+                    "name": str(a["name"]),
+                    "type_repr": str(a["type_repr"] or ""),
+                    "synonym": str(a["synonym"] or ""),
+                    "comment": str(a["comment"] or ""),
+                    "is_required": bool(a["is_required"]),
+                }
+                for a in attributes
+            ],
+            "dimensions": [
+                {
+                    "name": str(d["name"]),
+                    "type_repr": str(d["type_repr"] or ""),
+                    "synonym": str(d["synonym"] or ""),
+                    "comment": str(d["comment"] or ""),
+                    "is_required": bool(d["is_required"]),
+                }
+                for d in dimensions
+            ],
+            "resources": [
+                {
+                    "name": str(r["name"]),
+                    "type_repr": str(r["type_repr"] or ""),
+                    "synonym": str(r["synonym"] or ""),
+                    "comment": str(r["comment"] or ""),
+                    "is_required": bool(r["is_required"]),
+                }
+                for r in resources
+            ],
+            "tabular_sections": tabular_sections,
         }
 
     def get_chunk_text(

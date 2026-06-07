@@ -282,7 +282,9 @@ class Pipeline:
 
     @staticmethod
     def _compute_chunking_hash(max_tokens: int, overlap_tokens: int) -> str:
-        payload = f"{max_tokens}:{overlap_tokens}".encode()
+        from onec_conf_doc.rag.chunker import CHUNKER_VERSION
+
+        payload = f"{CHUNKER_VERSION}:{max_tokens}:{overlap_tokens}".encode()
         return hashlib.sha256(payload).hexdigest()
 
     def _chunking_hash(self) -> str:

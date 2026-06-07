@@ -33,3 +33,12 @@ repos:
     hooks:
       - id: conventional-pre-commit
         stages: [commit-msg]
+
+  - repo: local
+    hooks:
+      - id: check-changelog
+        name: check CHANGELOG updated for code changes
+        entry: python scripts/check_changelog.py
+        language: system
+        pass_filenames: false
+        files: ^src/onec_conf_doc/

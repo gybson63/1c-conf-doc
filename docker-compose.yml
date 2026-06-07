@@ -1,0 +1,21 @@
+# Backend для MCP: индекс + HTTP API.
+# MCP-клиент (conf-doc mcp) запускается на хосте — см. mcp.json.docker.example.
+services:
+  conf-doc:
+    build:
+      context: .
+      args:
+        EXTRAS: embeddings
+    ports:
+      - "${CONF_DOC_PORT:-8050}:8000"
+    volumes:
+      - ./data/export:/data/export:ro
+      - ./output:/data/output
+      - ./config.yaml:/config/config.yaml:ro
+      - model-cache:/root/.cache/huggingface
+    environment:
+      CONF_DOC_CONFIG_PATH: /config/config.yaml
+    restart: unless-stopped
+
+volumes:
+  model-cache:

@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<MetaDataObject xmlns="http://v8.1c.ru/8.3/MDClasses" xmlns:v8="http://v8.1c.ru/8.1/data/core" version="2.20">
+	<Report uuid="aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa">
+		<Properties>
+			<Name>ТестовыйОтчет</Name>
+			<Synonym>
+				<v8:item>
+					<v8:lang>ru</v8:lang>
+					<v8:content>Тестовый отчёт</v8:content>
+				</v8:item>
+			</Synonym>
+			<Comment>Отчёт для тестов</Comment>
+			<Explanation>Описание тестового отчёта</Explanation>
+			<MainDataCompositionSchema>Report.ТестовыйОтчет.Template.ОсновнаяСхемаКомпоновкиДанных</MainDataCompositionSchema>
+		</Properties>
+		<ChildObjects>
+			<Form>ФормаОтчета</Form>
+			<Template>ОсновнаяСхемаКомпоновкиДанных</Template>
+		</ChildObjects>
+	</Report>
+</MetaDataObject>

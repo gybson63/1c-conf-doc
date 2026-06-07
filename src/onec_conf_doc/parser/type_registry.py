@@ -36,6 +36,15 @@ FOLDER_TO_TYPE: dict[str, str] = {
 
 TYPE_TO_FOLDER: dict[str, str] = {v: k for k, v in FOLDER_TO_TYPE.items()}
 
+REGISTER_TYPES: frozenset[str] = frozenset(
+    {
+        "InformationRegister",
+        "AccumulationRegister",
+        "AccountingRegister",
+        "CalculationRegister",
+    }
+)
+
 TYPE_LABELS_RU: dict[str, str] = {
     "Catalog": "Справочник",
     "Document": "Документ",

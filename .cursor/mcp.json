@@ -1,0 +1,11 @@
+{
+  "mcpServers": {
+    "1c-conf-doc": {
+      "command": "${workspaceFolder}${/}scripts${/}mcp.cmd",
+      "env": {
+        "CONF_DOC_API_URL": "http://localhost:8050",
+        "CONF_DOC_CONFIGURATION": "ТестоваяКонфигурация"
+      }
+    }
+  }
+}

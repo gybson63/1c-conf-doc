@@ -12,6 +12,8 @@ def test_scan_export_finds_objects() -> None:
     assert ("Catalog", "Номенклатура") in names
     assert ("Document", "РеализацияТоваров") in names
     assert ("Enum", "ВидыОпераций") in names
+    assert ("Report", "ТестовыйОтчет") in names
+    assert ("InformationRegister", "КадроваяИсторияСотрудников") in names
 
 
 def test_parse_catalog() -> None:
@@ -43,8 +45,49 @@ def test_parse_enum() -> None:
     assert obj.enum_values[0].name == "Продажа"
 
 
+def test_parse_report_module_and_dcs_queries() -> None:
+    path = FIXTURES / "Reports" / "ТестовыйОтчет.xml"
+    obj = parse_metadata_file(path, "Report", source_root=FIXTURES)
+    assert obj.name == "ТестовыйОтчет"
+    assert "ПриКомпоновкеРезультата" in obj.object_module
+    assert obj.main_dcs_name == "ОсновнаяСхемаКомпоновкиДанных"
+    assert len(obj.dcs_queries) == 2
+    assert obj.dcs_queries[0].dataset_name == "НаборДанных1"
+    assert "Справочник.Номенклатура" in obj.dcs_queries[0].query_text
+    assert obj.dcs_queries[1].dataset_name == "НаборДанных2"
+    assert "Справочник.Контрагенты" in obj.dcs_queries[1].query_text
+
+
+def test_parse_catalog_has_no_report_fields() -> None:
+    path = FIXTURES / "Catalogs" / "Номенклатура.xml"
+    obj = parse_metadata_file(path, "Catalog", source_root=FIXTURES)
+    assert obj.object_module == ""
+    assert obj.dcs_queries == []
+
+
 def test_parse_configuration() -> None:
     info = parse_configuration(FIXTURES / "Configuration.xml")
     assert info.name == "ТестоваяКонфигурация"
     assert info.synonym == "Тестовая конфигурация"
     assert info.version == "1.0.0.1"
+
+
+def test_parse_information_register() -> None:
+    path = FIXTURES / "InformationRegisters" / "КадроваяИсторияСотрудников.xml"
+    obj = parse_metadata_file(path, "InformationRegister", source_root=FIXTURES)
+    assert obj.name == "КадроваяИсторияСотрудников"
+    assert obj.synonym == "Кадровая история сотрудников"
+    assert obj.register_periodicity == "Second"
+    assert obj.register_write_mode == "RecorderSubordinate"
+    assert len(obj.dimensions) == 5
+    dim_names = {d.name for d in obj.dimensions}
+    assert dim_names == {
+        "Сотрудник",
+        "Подразделение",
+        "Должность",
+        "ВидСобытия",
+        "ГоловнаяОрганизация",
+    }
+    assert obj.dimensions[0].type_repr == "CatalogRef.Сотрудники"
+    assert obj.attributes == []
+    assert obj.resources == []

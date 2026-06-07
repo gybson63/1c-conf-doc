@@ -22,9 +22,9 @@ def test_api_health_and_objects(tmp_path) -> None:
 
     reindex_force = client.post("/reindex", json={"skip_embeddings": True, "force": True})
     assert reindex_force.status_code == 200
-    assert reindex_force.json()["chunks_rebuilt"] == 3
+    assert reindex_force.json()["chunks_rebuilt"] == 5
     assert reindex.json()["configuration_name"] == "ТестоваяКонфигурация"
-    assert reindex.json()["objects_total"] == 3
+    assert reindex.json()["objects_total"] == 5
 
     objects = client.get(
         "/objects",
@@ -62,4 +62,25 @@ def test_api_health_and_objects(tmp_path) -> None:
         },
     )
     assert search.status_code == 200
-    assert len(search.json()) >= 1
+    results = search.json()
+    assert len(results) >= 1
+    top = results[0]
+    assert top["name"] == "Номенклатура"
+    assert "odata_fields" in top
+    assert top["odata_fields"]["entity_type"] == "Catalog_Номенклатура"
+    assert any(f["name"] == "Артикул" for f in top["odata_fields"]["fields"])
+    assert len(top["odata_fields"]["tabular_sections"]) == 1
+    if len(results) >= 2:
+        assert "odata_fields" not in results[1]
+
+    search_no_fields = client.post(
+        "/search",
+        json={
+            "query": "номенклатура",
+            "configuration": "ТестоваяКонфигурация",
+            "top_k": 3,
+            "include_fields": False,
+        },
+    )
+    assert search_no_fields.status_code == 200
+    assert "odata_fields" not in search_no_fields.json()[0]
