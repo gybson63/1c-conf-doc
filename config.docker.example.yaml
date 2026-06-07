@@ -1,0 +1,25 @@
+# Пример конфигурации для Docker (скопируйте в config.yaml).
+# Пути внутри контейнера — см. volumes в docker-compose.yml.
+
+source: /data/export
+output: /data/output
+
+configuration: null
+
+embeddings:
+  provider: sentence_transformers
+  model: paraphrase-multilingual-MiniLM-L12-v2
+
+faiss:
+  index_type: flat
+
+chunking:
+  max_tokens: 1500
+  overlap_tokens: 100
+
+llm:
+  provider: none
+
+api:
+  host: 0.0.0.0
+  port: 8000

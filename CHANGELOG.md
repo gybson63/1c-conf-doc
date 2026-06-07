@@ -11,11 +11,16 @@
 
 ### Added
 
+- Документация [docs/DOCKER_UPDATE.md](docs/DOCKER_UPDATE.md) — процедура обновления Docker-контейнера после значимых изменений.
+- Docker: `Dockerfile`, `docker-compose.yml`, `config.docker.example.yaml` — backend для MCP.
+- Готовый [`.cursor/mcp.json`](.cursor/mcp.json) и launcher'ы `scripts/mcp.cmd` / `scripts/mcp.sh`.
 - MCP-сервер (`conf-doc mcp`): подключение к удалённому conf-doc API из Cursor и других MCP-клиентов через stdio.
 - Опциональная зависимость `[mcp]` и пример конфигурации `mcp.json.example`.
 
 ### Changed
 
+- Документация и позиционирование: MCP — основной сценарий; Docker — backend для MCP; `mcp.json.docker.example`.
+- Docker по умолчанию на хосте слушает порт **8050** (`CONF_DOC_PORT`), локальная отладка — **8000**.
 - Документация: раздел «Поиск и RAG» (README, ARCHITECTURE, skill) — embeddings vs LLM, настройка `llm.provider`, когда нужен `/query`.
 
 ### Fixed

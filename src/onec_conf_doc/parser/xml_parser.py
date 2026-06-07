@@ -17,7 +17,14 @@ from onec_conf_doc.models.metadata import (
     MetadataObject,
     TabularSection,
 )
-from onec_conf_doc.parser.scanner import find_help_files
+from onec_conf_doc.parser.dcs_parser import extract_dcs_queries
+from onec_conf_doc.parser.scanner import (
+    find_help_files,
+    object_subdirectory,
+    read_object_module,
+    resolve_main_dcs_template,
+    template_name_from_dcs_ref,
+)
 
 NS = {
     "md": "http://v8.1c.ru/8.3/MDClasses",
@@ -255,6 +262,18 @@ def parse_metadata_file(
         forms=_parse_forms(child_objects),
         help_pages=help_pages,
     )
+
+    if (object_type or tag) == "Report" and source_root is not None:
+        report_dir = object_subdirectory(source_root, "Report", name)
+        if report_dir is not None:
+            obj.object_module = read_object_module(report_dir)
+            main_dcs_ref = _text(props.find("md:MainDataCompositionSchema", NS))
+            if main_dcs_ref:
+                dcs_path = resolve_main_dcs_template(report_dir, main_dcs_ref)
+                if dcs_path is not None:
+                    obj.main_dcs_name = template_name_from_dcs_ref(main_dcs_ref)
+                    obj.dcs_queries = extract_dcs_queries(dcs_path)
+
     obj.content_hash = obj.compute_hash()
     return obj
 

@@ -35,7 +35,8 @@ def create_mcp_server(client: ConfDocApiClient | None = None) -> Any:
             "Семантический поиск и детали метаданных конфигурации 1С через conf-doc API. "
             "Workflow: list_configurations → search → get_object → get_object_chunk. "
             "По умолчанию search обрезает text до 800 символов; "
-            "используй full=true для полного текста."
+            "используй full=true для полного текста. "
+            "Top-1 результата search содержит odata_fields с реквизитами объекта."
         ),
     )
 
@@ -72,6 +73,7 @@ def create_mcp_server(client: ConfDocApiClient | None = None) -> Any:
         query: str,
         top_k: int = 5,
         full: bool = False,
+        include_fields: bool = True,
         object_type: str | None = None,
         configuration: str | None = None,
     ) -> JsonText:
@@ -81,6 +83,7 @@ def create_mcp_server(client: ConfDocApiClient | None = None) -> Any:
             query: Поисковый запрос на естественном языке.
             top_k: Число результатов (1–50).
             full: True — полный текст чанка; False — превью до 800 символов.
+            include_fields: True — для top-1 добавить odata_fields (JSON реквизитов из SQLite).
             object_type: Фильтр типа метаданных (Document, Catalog, Enum, …).
             configuration: Имя конфигурации; если не задано — из
                 CONF_DOC_CONFIGURATION или первая в БД.
@@ -92,6 +95,7 @@ def create_mcp_server(client: ConfDocApiClient | None = None) -> Any:
                         query,
                         top_k=top_k,
                         full=full,
+                        include_fields=include_fields,
                         object_type=object_type,
                         configuration=configuration,
                     )

@@ -12,6 +12,7 @@ def test_scan_export_finds_objects() -> None:
     assert ("Catalog", "Номенклатура") in names
     assert ("Document", "РеализацияТоваров") in names
     assert ("Enum", "ВидыОпераций") in names
+    assert ("Report", "ТестовыйОтчет") in names
 
 
 def test_parse_catalog() -> None:
@@ -41,6 +42,26 @@ def test_parse_enum() -> None:
     obj = parse_metadata_file(path, "Enum", source_root=FIXTURES)
     assert len(obj.enum_values) == 1
     assert obj.enum_values[0].name == "Продажа"
+
+
+def test_parse_report_module_and_dcs_queries() -> None:
+    path = FIXTURES / "Reports" / "ТестовыйОтчет.xml"
+    obj = parse_metadata_file(path, "Report", source_root=FIXTURES)
+    assert obj.name == "ТестовыйОтчет"
+    assert "ПриКомпоновкеРезультата" in obj.object_module
+    assert obj.main_dcs_name == "ОсновнаяСхемаКомпоновкиДанных"
+    assert len(obj.dcs_queries) == 2
+    assert obj.dcs_queries[0].dataset_name == "НаборДанных1"
+    assert "Справочник.Номенклатура" in obj.dcs_queries[0].query_text
+    assert obj.dcs_queries[1].dataset_name == "НаборДанных2"
+    assert "Справочник.Контрагенты" in obj.dcs_queries[1].query_text
+
+
+def test_parse_catalog_has_no_report_fields() -> None:
+    path = FIXTURES / "Catalogs" / "Номенклатура.xml"
+    obj = parse_metadata_file(path, "Catalog", source_root=FIXTURES)
+    assert obj.object_module == ""
+    assert obj.dcs_queries == []
 
 
 def test_parse_configuration() -> None:

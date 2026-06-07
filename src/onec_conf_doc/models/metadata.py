@@ -42,6 +42,11 @@ class HelpPage(BaseModel):
     source_path: str = ""
 
 
+class DcsQuery(BaseModel):
+    dataset_name: str
+    query_text: str
+
+
 class MetadataObject(BaseModel):
     object_type: str
     name: str
@@ -55,6 +60,9 @@ class MetadataObject(BaseModel):
     enum_values: list[EnumValue] = Field(default_factory=list)
     forms: list[FormRef] = Field(default_factory=list)
     help_pages: list[HelpPage] = Field(default_factory=list)
+    object_module: str = ""
+    main_dcs_name: str = ""
+    dcs_queries: list[DcsQuery] = Field(default_factory=list)
 
     def compute_hash(self) -> str:
         payload = self.model_dump_json(exclude={"content_hash", "source_xml"})

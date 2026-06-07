@@ -6,11 +6,23 @@ import hashlib
 import re
 from pathlib import Path
 
+CHUNKER_VERSION = "v3"
+
 OVERVIEW_SECTIONS = (
     "Справка",
     "Формы",
     "Значения перечисления",
 )
+
+SECTION_ORDER = (
+    "Реквизиты",
+    "Табличные части",
+    "Модуль объекта",
+)
+
+DCS_QUERY_SECTION_PREFIX = "Запрос СКД:"
+
+TABLE_SECTIONS = frozenset({"Реквизиты", "Табличные части"})
 
 _SECTION_RE = re.compile(r"^## ([^\n]+)", re.MULTILINE)
 
@@ -34,6 +46,126 @@ def _split_sections(md_text: str) -> tuple[str, dict[str, str]]:
         title = match.group(1).strip()
         sections[title] = part.strip()
     return header, sections
+
+
+def _is_dcs_query_section(title: str) -> bool:
+    return title.startswith(DCS_QUERY_SECTION_PREFIX)
+
+
+def _ordered_section_titles(sections: dict[str, str]) -> list[str]:
+    ordered: list[str] = []
+    for title in SECTION_ORDER:
+        if title in sections:
+            ordered.append(title)
+    dcs_titles = [title for title in sections if _is_dcs_query_section(title)]
+    ordered.extend(dcs_titles)
+    for title in sections:
+        if title not in SECTION_ORDER and not _is_dcs_query_section(title):
+            ordered.append(title)
+    return ordered
+
+
+def _is_table_line(line: str) -> bool:
+    stripped = line.strip()
+    return stripped.startswith("|") and "|" in stripped[1:]
+
+
+def _split_single_table(
+    preamble: str,
+    table_lines: list[str],
+    *,
+    max_tokens: int,
+    prefix: str,
+) -> list[str]:
+    if not table_lines:
+        body = preamble.strip()
+        if not body:
+            return []
+        piece = f"{prefix}\n\n{body}".strip() if prefix else body
+        return [piece]
+
+    if len(table_lines) < 2:
+        body = f"{preamble}\n\n" + "\n".join(table_lines) if preamble else "\n".join(table_lines)
+        piece = f"{prefix}\n\n{body}".strip() if prefix else body.strip()
+        return [piece]
+
+    header_row, separator, *data_rows = table_lines
+    table_head = f"{header_row}\n{separator}"
+
+    if not data_rows:
+        body = f"{preamble}\n\n{table_head}".strip() if preamble else table_head
+        piece = f"{prefix}\n\n{body}".strip() if prefix else body
+        return [piece]
+
+    def make_piece(rows: list[str]) -> str:
+        table_body = table_head
+        if rows:
+            table_body = f"{table_head}\n" + "\n".join(rows)
+        body = f"{preamble}\n\n{table_body}".strip() if preamble else table_body
+        return f"{prefix}\n\n{body}".strip() if prefix else body
+
+    full_piece = make_piece(data_rows)
+    if estimate_tokens(full_piece) <= max_tokens:
+        return [full_piece]
+
+    result: list[str] = []
+    batch: list[str] = []
+    for row in data_rows:
+        candidate = batch + [row]
+        if batch and estimate_tokens(make_piece(candidate)) > max_tokens:
+            result.append(make_piece(batch))
+            batch = [row]
+        else:
+            batch = candidate
+    if batch:
+        result.append(make_piece(batch))
+    return result
+
+
+def _split_markdown_table_by_rows(
+    text: str,
+    *,
+    max_tokens: int,
+    prefix: str = "",
+) -> list[str]:
+    """Split section text at markdown table row boundaries."""
+    normalized = text.strip()
+    if estimate_tokens(normalized) <= max_tokens:
+        return [normalized]
+
+    lines = normalized.split("\n")
+    pieces: list[str] = []
+    preamble_lines: list[str] = []
+    i = 0
+
+    while i < len(lines):
+        if not _is_table_line(lines[i]):
+            preamble_lines.append(lines[i])
+            i += 1
+            continue
+
+        table_lines: list[str] = []
+        while i < len(lines) and _is_table_line(lines[i]):
+            table_lines.append(lines[i])
+            i += 1
+
+        preamble = "\n".join(preamble_lines).strip()
+        table_pieces = _split_single_table(
+            preamble,
+            table_lines,
+            max_tokens=max_tokens,
+            prefix=prefix,
+        )
+        pieces.extend(table_pieces)
+        preamble_lines = []
+
+    if preamble_lines:
+        trailing = "\n".join(preamble_lines).strip()
+        if trailing:
+            piece = f"{prefix}\n\n{trailing}".strip() if prefix else trailing
+            pieces.append(piece)
+
+    return pieces if pieces else [normalized]
 
 
 def _split_by_size(
@@ -101,6 +233,39 @@ def _emit_text(
     return _emit_parts(chunks, split_parts, idx)
 
 
+def _emit_section(
+    chunks: list[tuple[int, str, int, str]],
+    content: str,
+    section_title: str,
+    idx: int,
+    *,
+    header: str,
+    max_tokens: int,
+    overlap_tokens: int,
+) -> int:
+    section_text = f"{header}\n\n{content}".strip() if header else content
+    prefix = header
+
+    if section_title in TABLE_SECTIONS:
+        if estimate_tokens(section_text) <= max_tokens:
+            return _emit_parts(chunks, [section_text], idx)
+        split_parts = _split_markdown_table_by_rows(
+            section_text,
+            max_tokens=max_tokens,
+            prefix=prefix,
+        )
+        return _emit_parts(chunks, split_parts, idx)
+
+    return _emit_text(
+        chunks,
+        section_text,
+        idx,
+        max_tokens=max_tokens,
+        overlap_tokens=overlap_tokens,
+        prefix=prefix,
+    )
+
+
 def chunk_markdown(
     md_text: str,
     *,
@@ -136,15 +301,16 @@ def chunk_markdown(
         overlap_tokens=overlap_tokens,
     )
 
-    for content in remaining.values():
-        section_text = f"{header}\n\n{content}".strip() if header else content
-        idx = _emit_text(
+    for title in _ordered_section_titles(remaining):
+        content = remaining[title]
+        idx = _emit_section(
             chunks,
-            section_text,
+            content,
+            title,
             idx,
+            header=header,
             max_tokens=max_tokens,
             overlap_tokens=overlap_tokens,
-            prefix=header,
         )
 
     return chunks

@@ -69,6 +69,37 @@ def generate_markdown(
             lines.append(f"- {form.name}{synonym}")
         lines.append("")
 
+    if obj.object_type == "Report":
+        if obj.object_module:
+            lines.extend(
+                [
+                    "## Модуль объекта",
+                    "",
+                    "```bsl",
+                    obj.object_module,
+                    "```",
+                    "",
+                ]
+            )
+        for dcs_query in obj.dcs_queries:
+            lines.extend(
+                [
+                    f"## Запрос СКД: {dcs_query.dataset_name}",
+                    "",
+                ]
+            )
+            if obj.main_dcs_name:
+                lines.append(f"**Макет:** {obj.main_dcs_name}  ")
+                lines.append("")
+            lines.extend(
+                [
+                    "```1c",
+                    dcs_query.query_text,
+                    "```",
+                    "",
+                ]
+            )
+
     if obj.help_pages:
         lines.extend(["## Справка", ""])
         for page in obj.help_pages:

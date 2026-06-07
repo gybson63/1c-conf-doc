@@ -7,6 +7,7 @@ from typing import Any, cast
 from fastapi import APIRouter, HTTPException, Query, Request
 from pydantic import BaseModel, Field
 
+from onec_conf_doc.metadata.odata import build_odata_fields_payload
 from onec_conf_doc.rag.pipeline import Pipeline
 
 
@@ -19,6 +20,7 @@ class SearchRequest(BaseModel):
     query: str
     top_k: int = Field(default=5, ge=1, le=50)
     full: bool = False
+    include_fields: bool = True
     object_type: str | None = None
     configuration: str | None = None
 
@@ -110,6 +112,7 @@ def create_router() -> APIRouter:
     @router.post("/search")
     def search(body: SearchRequest, request: Request) -> list[dict[str, Any]]:
         pipeline = resolve_pipeline(request, body.configuration)
+        cfg = pipeline.active_configuration
         results = pipeline.search(body.query, top_k=body.top_k)
         if body.object_type:
             results = [r for r in results if r.get("object_type") == body.object_type]
@@ -118,6 +121,23 @@ def create_router() -> APIRouter:
                 text = str(hit.get("text", ""))
                 if len(text) > 800:
                     hit["text"] = text[:800] + "..."
+        if body.include_fields and results:
+            top = results[0]
+            object_type = str(top.get("object_type", ""))
+            obj_name = str(top.get("name", ""))
+            if object_type and obj_name:
+                fields_data = pipeline.indexer.get_object_fields(
+                    object_type,
+                    obj_name,
+                    config_id=cfg.id,
+                )
+                if fields_data is not None:
+                    top["odata_fields"] = build_odata_fields_payload(
+                        object_type,
+                        obj_name,
+                        fields_data["attributes"],  # type: ignore[arg-type]
+                        fields_data["tabular_sections"],  # type: ignore[arg-type]
+                    )
         return results
 
     @router.get("/objects/{object_type}/{name}")

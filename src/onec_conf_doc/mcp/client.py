@@ -96,6 +96,7 @@ class ConfDocApiClient:
         *,
         top_k: int = 5,
         full: bool = False,
+        include_fields: bool = True,
         object_type: str | None = None,
         configuration: str | None = None,
     ) -> list[dict[str, Any]]:
@@ -103,6 +104,7 @@ class ConfDocApiClient:
             "query": query,
             "top_k": top_k,
             "full": full,
+            "include_fields": include_fields,
         }
         resolved = self._resolve_configuration(configuration)
         if resolved:
