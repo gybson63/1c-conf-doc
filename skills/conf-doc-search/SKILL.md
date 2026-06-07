@@ -114,6 +114,32 @@ Query: `?configuration=...`
 - Основа — семантика (FAISS).
 - Точное совпадение query с именем/синонимом объекта поднимает его в топ (любой тип метаданных).
 
+## RAG и LLM (`POST /query`)
+
+`/query` и MCP-инструмент `conf_doc_query` — **опциональны**. Для обычного workflow через API достаточно `/search` + `/objects/.../chunks/...`.
+
+### Embeddings vs LLM
+
+| | Embeddings | LLM |
+|---|------------|-----|
+| Зачем | Семантический поиск (FAISS) | Связный ответ по найденным чанкам |
+| Config | `embeddings.provider` | `llm.provider` |
+| Endpoints | `/search` | `/query` |
+| По умолчанию | Настраивается при index | `llm.provider: none` (выключен) |
+
+### Алгоритм RAG
+
+1. `search(question)` → top-k чанков;
+2. промпт с контекстом → `LLMProvider` на **сервере**;
+3. ответ: `{"answer": "...", "sources": [...]}`.
+
+LLM настраивается в `config.yaml` **на сервере** `conf-doc serve` (`ollama` / `openai` / `none`). MCP-клиент LLM не требует.
+
+### Когда использовать `/query` vs search + chunks
+
+- **search + chunks** — основной путь для агента в Cursor: агент сам читает фрагменты и отвечает.
+- **`/query`** — один HTTP-вызов «вопрос → ответ», если на сервере включён LLM.
+
 ## Ограничения удалённого доступа
 
 - Нет прямого чтения `.md` файлов и SQLite — только API.

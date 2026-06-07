@@ -26,6 +26,7 @@ dependencies = [
 [project.optional-dependencies]
 embeddings = ["sentence-transformers>=3.0"]
 openai = ["openai>=1.0"]
+mcp = ["mcp>=1.6"]
 dev = [
     "mypy>=1.13",
     "pre-commit>=4.0",
@@ -34,7 +35,7 @@ dev = [
     "types-PyYAML",
     "types-tqdm",
 ]
-all = ["1c-conf-doc[embeddings,openai,dev]"]
+all = ["1c-conf-doc[embeddings,openai,mcp,dev]"]
 
 [project.scripts]
 conf-doc = "onec_conf_doc.cli:app"
@@ -85,5 +86,6 @@ module = [
     "html2text.*",
     "yaml.*",
     "tqdm.*",
+    "mcp.*",
 ]
 ignore_missing_imports = true

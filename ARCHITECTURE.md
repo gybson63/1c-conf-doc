@@ -362,9 +362,33 @@ FastAPI-приложение (`api/app.py`) держит один экземпл
 `POST /query` → `pipeline.query_rag()`:
 
 1. `search()` → контекст из top-k чанков;
-2. промпт → `LLMProvider` (OpenAI / Ollama / заглушка).
+2. промпт с инструкцией «ответь на основе справочной информации 1С»;
+3. `LLMProvider.generate()` → связный ответ + `sources`.
+
+### Embeddings и LLM — разные вещи
+
+| Слой | Модуль | Config | Endpoint |
+|------|--------|--------|----------|
+| Поиск (retrieval) | `rag/embeddings/`, FAISS | `embeddings.*` | `POST /search` |
+| Генерация (generation) | `rag/llm.py` | `llm.*` | `POST /query` |
+
+Эмбеддинги нужны для индексации и поиска; LLM — только для `/query`. Поиск работает при `llm.provider: none`.
+
+### Провайдеры LLM
+
+`create_llm_provider()` в `rag/llm.py`:
+
+- `openai` — Chat Completions (`OPENAI_API_KEY` или `llm.openai_api_key`);
+- `ollama` — `POST {ollama_base_url}/api/generate`;
+- `none` — заглушка; `routes.py` возвращает HTTP 503 на `/query`.
 
 По умолчанию LLM отключён (`llm.provider: none`).
+
+### Клиенты без LLM
+
+MCP (`conf_doc_query`) и skill `conf-doc-search` рассчитаны на API-only доступ. Для агентов в Cursor достаточно `/search` + `/objects/.../chunks/...` — ответ формирует сам агент. `/query` нужен, когда готовый RAG-ответ должен выдавать сервер conf-doc.
+
+Подробнее для пользователей: [README.md — Поиск и RAG](README.md#поиск-и-rag-embeddings-vs-llm).
 
 ## Расширение
 

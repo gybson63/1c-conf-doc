@@ -11,7 +11,12 @@
 
 ### Added
 
+- MCP-сервер (`conf-doc mcp`): подключение к удалённому conf-doc API из Cursor и других MCP-клиентов через stdio.
+- Опциональная зависимость `[mcp]` и пример конфигурации `mcp.json.example`.
+
 ### Changed
+
+- Документация: раздел «Поиск и RAG» (README, ARCHITECTURE, skill) — embeddings vs LLM, настройка `llm.provider`, когда нужен `/query`.
 
 ### Fixed
 

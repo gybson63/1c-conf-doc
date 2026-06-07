@@ -12,6 +12,9 @@
 CONF_DOC_API_URL=https://conf-doc.example.com
 ```
 
+**MCP (другие проекты Cursor):** `pip install -e ".[mcp]"`, команда `conf-doc mcp`, конфиг — [mcp.json.example](mcp.json.example).  
+RAG (`conf_doc_query`) опционален — см. [README — Поиск и RAG](README.md#поиск-и-rag-embeddings-vs-llm).
+
 ## Skills (обязательно)
 
 `skills/conf-doc-search/SKILL.md` — workflow поиска и углубления **через API**:
