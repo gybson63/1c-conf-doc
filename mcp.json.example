@@ -1,0 +1,12 @@
+{
+  "mcpServers": {
+    "1c-conf-doc": {
+      "command": "conf-doc",
+      "args": ["mcp"],
+      "env": {
+        "CONF_DOC_API_URL": "https://conf-doc.example.com",
+        "CONF_DOC_CONFIGURATION": "ЗарплатаИУправлениеПерсоналомКОРП"
+      }
+    }
+  }
+}

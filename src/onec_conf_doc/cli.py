@@ -207,6 +207,20 @@ def _safe_echo(text: str) -> str:
     return text.replace("\ufeff", "").strip()
 
 
+@app.command("mcp")
+def mcp_cmd() -> None:
+    """Запустить MCP-сервер (stdio) для подключения из Cursor и других MCP-клиентов."""
+    try:
+        from onec_conf_doc.mcp.server import run_stdio_server
+    except ImportError as exc:
+        typer.echo(
+            'Для MCP установите опциональную зависимость: pip install -e ".[mcp]"',
+            err=True,
+        )
+        raise typer.Exit(code=1) from exc
+    run_stdio_server()
+
+
 @app.command("serve")
 def serve_cmd(
     host: Annotated[str | None, typer.Option(help="Host")] = None,

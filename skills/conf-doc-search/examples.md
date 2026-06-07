@@ -53,7 +53,9 @@ curl -s "$API/configurations"
 curl -s "$API/objects?q=Отпуск&object_type=Document&configuration=ЗарплатаИУправлениеПерсоналомКОРП"
 ```
 
-## RAG-ответ (если LLM включён на сервере)
+## RAG-ответ (опционально; нужен `llm.provider` на сервере)
+
+См. [SKILL.md — RAG и LLM](SKILL.md#rag-и-llm-post-query). Без LLM используйте `/search` + `/objects/.../chunks/...`.
 
 ```bash
 curl -s -X POST "$API/query" \
