@@ -1,0 +1,164 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>1c-conf-doc</title>
+  <link rel="stylesheet" href="/static/styles.css">
+</head>
+<body>
+  <header class="header">
+    <h1>1c-conf-doc</h1>
+    <p class="subtitle">Индекс и поиск по документации конфигурации 1С</p>
+  </header>
+
+  <nav class="tabs" role="tablist">
+    <button class="tab active" data-tab="dashboard">Статус</button>
+    <button class="tab" data-tab="configurations">Конфигурации</button>
+    <button class="tab" data-tab="add">Добавить</button>
+    <button class="tab" data-tab="search">Поиск</button>
+    <button class="tab" data-tab="logs">Логи</button>
+  </nav>
+
+  <main>
+    <section id="panel-dashboard" class="panel active">
+      <div class="card">
+        <div class="card-header">
+          <h2>Health check</h2>
+          <button id="btn-refresh-health" class="btn secondary">Обновить</button>
+        </div>
+        <div id="health-content" class="health-grid">
+          <p class="muted">Загрузка...</p>
+        </div>
+      </div>
+    </section>
+
+    <section id="panel-configurations" class="panel">
+      <div class="card">
+        <div class="card-header">
+          <h2>Конфигурации</h2>
+          <button id="btn-refresh-configs" class="btn secondary">Обновить</button>
+        </div>
+        <div class="table-wrap">
+          <table id="configs-table">
+            <thead>
+              <tr>
+                <th>Имя</th>
+                <th>Синоним</th>
+                <th>Версия</th>
+                <th>Объектов</th>
+                <th>Индексация</th>
+                <th>Путь</th>
+                <th></th>
+              </tr>
+            </thead>
+            <tbody id="configs-body">
+              <tr><td colspan="7" class="muted">Загрузка...</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+
+    <section id="panel-add" class="panel">
+      <div class="card">
+        <div class="subtabs">
+          <button class="subtab active" data-subtab="path">Путь на сервере</button>
+          <button class="subtab" data-subtab="zip">ZIP-архив</button>
+        </div>
+
+        <div id="subpanel-path" class="subpanel active">
+          <form id="form-path" class="form">
+            <label>
+              Путь к выгрузке
+              <input type="text" id="input-source-path" placeholder="/data/export" required>
+            </label>
+            <p class="hint">Смонтируйте выгрузку в контейнер и укажите абсолютный путь к каталогу с Configuration.xml</p>
+            <label class="checkbox"><input type="checkbox" id="path-skip-embeddings"> Пропустить эмбеддинги</label>
+            <label class="checkbox"><input type="checkbox" id="path-force"> Полная пересборка (force)</label>
+            <button type="submit" class="btn primary">Индексировать</button>
+          </form>
+        </div>
+
+        <div id="subpanel-zip" class="subpanel">
+          <form id="form-zip" class="form">
+            <div id="drop-zone" class="drop-zone">
+              <p>Перетащите .zip сюда или выберите файл</p>
+              <input type="file" id="input-zip" accept=".zip" hidden>
+              <button type="button" id="btn-pick-zip" class="btn secondary">Выбрать файл</button>
+              <p id="zip-filename" class="zip-name"></p>
+            </div>
+            <label class="checkbox"><input type="checkbox" id="zip-skip-embeddings"> Пропустить эмбеддинги</label>
+            <label class="checkbox"><input type="checkbox" id="zip-force"> Полная пересборка (force)</label>
+            <button type="submit" class="btn primary" id="btn-upload" disabled>Загрузить и индексировать</button>
+          </form>
+        </div>
+
+        <div id="add-job-status" class="job-status hidden"></div>
+      </div>
+    </section>
+
+    <section id="panel-search" class="panel">
+      <div class="card">
+        <form id="form-search" class="form">
+          <label>
+            Запрос
+            <input type="text" id="search-query" placeholder="номенклатура, документ продажи..." required>
+          </label>
+          <div class="form-row">
+            <label>
+              Конфигурация
+              <select id="search-configuration"><option value="">— загрузка —</option></select>
+            </label>
+            <label>
+              top_k
+              <input type="number" id="search-top-k" value="5" min="1" max="50">
+            </label>
+          </div>
+          <label class="checkbox"><input type="checkbox" id="search-full" checked> Полный текст чанков</label>
+          <button type="submit" class="btn primary">Искать</button>
+        </form>
+        <div id="search-results" class="search-results"></div>
+      </div>
+    </section>
+
+    <section id="panel-object" class="panel">
+      <div class="card">
+        <div class="card-header">
+          <button id="btn-object-back" type="button" class="btn secondary">← К поиску</button>
+          <a id="object-json-link" class="btn secondary" href="#" target="_blank">JSON</a>
+        </div>
+        <div id="object-header" class="object-header">
+          <p class="muted">Загрузка...</p>
+        </div>
+        <div id="object-chunks" class="object-chunks"></div>
+      </div>
+    </section>
+
+    <section id="panel-logs" class="panel">
+      <div class="logs-layout">
+        <div class="card logs-jobs">
+          <div class="card-header">
+            <h2>Задачи индексации</h2>
+            <button id="btn-refresh-jobs" class="btn secondary">Обновить</button>
+          </div>
+          <ul id="jobs-list" class="jobs-list"></ul>
+        </div>
+        <div class="card logs-main">
+          <div class="card-header">
+            <h2 id="logs-title">Лог сервера</h2>
+            <div class="btn-group">
+              <button id="btn-logs-pause" class="btn secondary">Пауза</button>
+              <button id="btn-logs-clear" class="btn secondary">Очистить экран</button>
+              <button id="btn-logs-refresh" class="btn secondary">Обновить</button>
+            </div>
+          </div>
+          <pre id="logs-output" class="log-output"></pre>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <script src="/static/app.js"></script>
+</body>
+</html>

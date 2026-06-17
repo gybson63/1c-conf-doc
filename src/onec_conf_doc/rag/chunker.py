@@ -6,7 +6,7 @@ import hashlib
 import re
 from pathlib import Path
 
-CHUNKER_VERSION = "v3"
+CHUNKER_VERSION = "v4"
 
 OVERVIEW_SECTIONS = (
     "Справка",
@@ -18,11 +18,22 @@ SECTION_ORDER = (
     "Реквизиты",
     "Табличные части",
     "Модуль объекта",
+    "Права",
 )
 
 DCS_QUERY_SECTION_PREFIX = "Запрос СКД:"
+RIGHTS_SECTION_PREFIX = "Права:"
 
 TABLE_SECTIONS = frozenset({"Реквизиты", "Табличные части"})
+
+
+def _is_rights_table_section(title: str) -> bool:
+    return title.startswith(RIGHTS_SECTION_PREFIX)
+
+
+def _is_table_section(title: str) -> bool:
+    return title in TABLE_SECTIONS or _is_rights_table_section(title)
+
 
 _SECTION_RE = re.compile(r"^## ([^\n]+)", re.MULTILINE)
 
@@ -246,7 +257,7 @@ def _emit_section(
     section_text = f"{header}\n\n{content}".strip() if header else content
     prefix = header
 
-    if section_title in TABLE_SECTIONS:
+    if _is_table_section(section_title):
         if estimate_tokens(section_text) <= max_tokens:
             return _emit_parts(chunks, [section_text], idx)
         split_parts = _split_markdown_table_by_rows(

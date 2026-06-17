@@ -15,16 +15,20 @@ def test_api_health_and_objects(tmp_path) -> None:
 
     health = client.get("/health")
     assert health.status_code == 200
-    assert health.json()["status"] == "ok"
+    health_body = health.json()
+    assert health_body["status"] == "ok"
+    assert "version" in health_body
+    assert health_body["database"] == "ok"
+    assert health_body["configurations_count"] == 0
 
     reindex = client.post("/reindex", json={"skip_embeddings": True})
     assert reindex.status_code == 200
 
     reindex_force = client.post("/reindex", json={"skip_embeddings": True, "force": True})
     assert reindex_force.status_code == 200
-    assert reindex_force.json()["chunks_rebuilt"] == 5
+    assert reindex_force.json()["chunks_rebuilt"] == 6
     assert reindex.json()["configuration_name"] == "ТестоваяКонфигурация"
-    assert reindex.json()["objects_total"] == 5
+    assert reindex.json()["objects_total"] == 6
 
     objects = client.get(
         "/objects",
@@ -84,3 +88,10 @@ def test_api_health_and_objects(tmp_path) -> None:
     )
     assert search_no_fields.status_code == 200
     assert "odata_fields" not in search_no_fields.json()[0]
+
+    reindex_source = client.post(
+        "/reindex",
+        json={"source": str(FIXTURES), "skip_embeddings": True},
+    )
+    assert reindex_source.status_code == 200
+    assert reindex_source.json()["configuration_name"] == "ТестоваяКонфигурация"

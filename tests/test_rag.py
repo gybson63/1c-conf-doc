@@ -99,6 +99,43 @@ def test_chunk_markdown_splits_requisites_table_by_rows() -> None:
         assert "attr0" in requisites_chunks[0][1]
 
 
+def test_chunk_markdown_role_rights_sections() -> None:
+    path = FIXTURES / "Roles" / "ТестоваяРоль.xml"
+    obj = parse_metadata_file(path, "Role", source_root=FIXTURES)
+    text = generate_markdown(obj)
+    chunks = chunk_markdown(text, max_tokens=1500)
+
+    overview = chunks[0][1]
+    assert "Тестовая роль" in overview
+    assert "## Права: Catalog" not in overview
+
+    catalog_chunks = [c for c in chunks if "## Права: Catalog" in c[1]]
+    assert len(catalog_chunks) == 1
+    assert "Номенклатура" in catalog_chunks[0][1]
+    assert "Read, View" in catalog_chunks[0][1]
+
+    document_chunks = [c for c in chunks if "## Права: Document" in c[1]]
+    assert len(document_chunks) == 1
+    assert "ТекущийСотрудник" in document_chunks[0][1]
+
+
+def test_chunk_markdown_splits_role_rights_table_by_rows() -> None:
+    header = "# Роль: BigRole\n\n**Тип:** Role\n"
+    rows = "\n".join(f"| Object{i} | Read, View | |" for i in range(120))
+    text = (
+        f"{header}\n## Права\n\n**Объектов с правами:** 120  \n\n"
+        f"## Права: Catalog\n\n"
+        "| Объект | Права | RLS |\n"
+        "|--------|-------|-----|\n"
+        f"{rows}\n"
+    )
+    chunks = chunk_markdown(text, max_tokens=200)
+    rights_chunks = [c for c in chunks if "## Права: Catalog" in c[1]]
+    assert len(rights_chunks) >= 2
+    for _idx, chunk_text, _tokens, _hash in rights_chunks:
+        assert "| Объект | Права |" in chunk_text
+
+
 def test_chunk_markdown_report_dcs_query_separate_from_overview() -> None:
     path = FIXTURES / "Reports" / "ТестовыйОтчет.xml"
     obj = parse_metadata_file(path, "Report", source_root=FIXTURES)

@@ -6,9 +6,16 @@ output: /data/output
 
 configuration: null
 
+# Эмбеддинги для /search (не путать с llm — chat-модель для /query ниже).
+# Дефолт: локально, без API-ключа. См. README — «Выбор провайдера эмбеддингов».
 embeddings:
   provider: sentence_transformers
   model: paraphrase-multilingual-MiniLM-L12-v2
+  # API-эмбеддинги (нужен образ: build --build-arg EXTRAS="embeddings,openai"):
+  # provider: openai
+  # base_url: https://polza.ai/api/v1
+  # model: text-embedding-3-small
+  # openai_api_key: your-key-here
 
 faiss:
   index_type: flat

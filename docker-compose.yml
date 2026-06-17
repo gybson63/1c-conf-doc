@@ -9,7 +9,7 @@ services:
     ports:
       - "${CONF_DOC_PORT:-8050}:8000"
     volumes:
-      - ./data/export:/data/export:ro
+      - ${CONF_DOC_EXPORT:-./data/export}:/data/export:ro
       - ./output:/data/output
       - ./config.yaml:/config/config.yaml:ro
       - model-cache:/root/.cache/huggingface

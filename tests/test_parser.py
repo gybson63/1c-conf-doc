@@ -14,6 +14,7 @@ def test_scan_export_finds_objects() -> None:
     assert ("Enum", "ВидыОпераций") in names
     assert ("Report", "ТестовыйОтчет") in names
     assert ("InformationRegister", "КадроваяИсторияСотрудников") in names
+    assert ("Role", "ТестоваяРоль") in names
 
 
 def test_parse_catalog() -> None:
@@ -91,3 +92,25 @@ def test_parse_information_register() -> None:
     assert obj.dimensions[0].type_repr == "CatalogRef.Сотрудники"
     assert obj.attributes == []
     assert obj.resources == []
+
+
+def test_parse_role_with_rights() -> None:
+    path = FIXTURES / "Roles" / "ТестоваяРоль.xml"
+    obj = parse_metadata_file(path, "Role", source_root=FIXTURES)
+    assert obj.name == "ТестоваяРоль"
+    assert obj.synonym == "Тестовая роль"
+    assert obj.comment == "Роль для тестов"
+    assert obj.role_rights is not None
+    assert obj.role_rights.set_for_new_objects is False
+    assert obj.role_rights.set_for_attributes_by_default is True
+    assert len(obj.role_rights.objects) == 3
+
+    by_name = {item.name: item for item in obj.role_rights.objects}
+    catalog = by_name["Catalog.Номенклатура"]
+    assert [right.name for right in catalog.rights] == ["Read", "View"]
+
+    document = by_name["Document.РеализацияТоваров"]
+    assert document.rights[0].restriction == "Где Сотрудник = &ТекущийСотрудник"
+
+    configuration = by_name["Configuration.ТестоваяКонфигурация"]
+    assert [right.name for right in configuration.rights] == ["ThinClient", "WebClient"]

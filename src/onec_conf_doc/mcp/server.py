@@ -34,6 +34,8 @@ def create_mcp_server(client: ConfDocApiClient | None = None) -> Any:
         instructions=(
             "Семантический поиск и детали метаданных конфигурации 1С через conf-doc API. "
             "Workflow: list_configurations → search → get_object → get_object_chunk. "
+            "Для ролей и прав: search_roles_by_object (точный поиск по объекту), "
+            "не векторный search. "
             "По умолчанию search обрезает text до 800 символов; "
             "используй full=true для полного текста. "
             "Top-1 результата search содержит odata_fields с реквизитами объекта."
@@ -147,6 +149,37 @@ def create_mcp_server(client: ConfDocApiClient | None = None) -> Any:
         try:
             with _client() as api:
                 return _dump(api.get_object(object_type, name, configuration=configuration))
+        except Exception as exc:  # noqa: BLE001
+            return _error_message(exc)
+
+    @mcp.tool()
+    def conf_doc_search_roles_by_object(
+        object_name: str,
+        rights: str | None = None,
+        metadata_type: str | None = None,
+        configuration: str | None = None,
+        limit: int = 100,
+    ) -> JsonText:
+        """Роли с правами на указанный объект метаданных (точный поиск по таблицам прав).
+
+        Args:
+            object_name: Имя объекта, например «Номенклатура» или «Catalog.Номенклатура».
+            rights: Фильтр прав через запятую (Read, View, …); роль должна выдавать все.
+            metadata_type: Ограничить секцией прав (Catalog, Document, …).
+            configuration: Имя конфигурации.
+            limit: Максимум результатов (1–500).
+        """
+        try:
+            with _client() as api:
+                return _dump(
+                    api.search_roles_by_object(
+                        object_name,
+                        rights=rights,
+                        metadata_type=metadata_type,
+                        configuration=configuration,
+                        limit=limit,
+                    )
+                )
         except Exception as exc:  # noqa: BLE001
             return _error_message(exc)
 

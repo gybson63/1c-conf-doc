@@ -61,7 +61,10 @@ def test_client_requires_base_url() -> None:
 
 
 def test_client_health_and_search(api_client: ConfDocApiClient) -> None:
-    assert api_client.health() == {"status": "ok"}
+    health = api_client.health()
+    assert health["status"] == "ok"
+    assert health["database"] == "ok"
+    assert "version" in health
 
     results = api_client.search("номенклатура", top_k=3)
     assert len(results) >= 1
@@ -76,6 +79,12 @@ def test_client_get_object_and_chunk(api_client: ConfDocApiClient) -> None:
     chunk = api_client.get_object_chunk("Catalog", "Номенклатура", 0)
     assert chunk["chunk_index"] == 0
     assert "text" in chunk
+
+
+def test_client_search_roles_by_object(api_client: ConfDocApiClient) -> None:
+    results = api_client.search_roles_by_object("Catalog.Номенклатура", rights="Read")
+    assert len(results) == 1
+    assert results[0]["role"] == "ТестоваяРоль"
 
 
 def test_client_not_found(api_client: ConfDocApiClient) -> None:
@@ -111,6 +120,7 @@ def test_mcp_tools_registered() -> None:
         "conf_doc_health",
         "conf_doc_list_configurations",
         "conf_doc_search",
+        "conf_doc_search_roles_by_object",
         "conf_doc_list_objects",
         "conf_doc_get_object",
         "conf_doc_get_object_chunk",
