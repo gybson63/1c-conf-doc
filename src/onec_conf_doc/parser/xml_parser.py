@@ -18,6 +18,7 @@ from onec_conf_doc.models.metadata import (
     TabularSection,
 )
 from onec_conf_doc.parser.dcs_parser import extract_dcs_queries
+from onec_conf_doc.parser.rights_parser import parse_role_rights, role_rights_path
 from onec_conf_doc.parser.scanner import (
     find_help_files,
     object_subdirectory,
@@ -290,6 +291,11 @@ def parse_metadata_file(
                 if dcs_path is not None:
                     obj.main_dcs_name = template_name_from_dcs_ref(main_dcs_ref)
                     obj.dcs_queries = extract_dcs_queries(dcs_path)
+
+    if resolved_type == "Role" and source_root is not None:
+        rights_file = role_rights_path(source_root, name)
+        if rights_file is not None:
+            obj.role_rights = parse_role_rights(rights_file)
 
     obj.content_hash = obj.compute_hash()
     return obj

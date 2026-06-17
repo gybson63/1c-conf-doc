@@ -77,4 +77,4 @@ def test_deleted_object_removed_from_db(tmp_path: Path) -> None:
     assert stats.objects_deleted == 1
     assert stats.chunks_rebuilt == 0
     assert pipeline.indexer.get_object_detail("Enum", "ВидыОпераций", config_id=config_id) is None
-    assert len(pipeline.indexer.list_objects(config_id=config_id)) == 4
+    assert len(pipeline.indexer.list_objects(config_id=config_id)) == 5

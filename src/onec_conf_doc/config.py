@@ -45,6 +45,7 @@ class AppConfig(BaseModel):
     source: Path = Path("./data/export")
     output: Path = Path("./output")
     configuration: str | None = None  # имя из Configuration.xml
+    import_roots: list[Path] = Field(default_factory=list)
     embeddings: EmbeddingsConfig = Field(default_factory=EmbeddingsConfig)
     faiss: FaissConfig = Field(default_factory=FaissConfig)
     chunking: ChunkingConfig = Field(default_factory=ChunkingConfig)
@@ -72,6 +73,15 @@ class AppConfig(BaseModel):
         if self.configuration:
             return self.vectors_dir_for(self.configuration)
         return self.output / "vectors"
+
+    def exports_dir(self) -> Path:
+        return self.output / "exports"
+
+    def resolved_import_roots(self) -> list[Path]:
+        if self.import_roots:
+            return [p.expanduser().resolve() for p in self.import_roots]
+        roots = [self.source.expanduser().resolve().parent, self.exports_dir().resolve()]
+        return roots
 
 
 class Settings(BaseSettings):

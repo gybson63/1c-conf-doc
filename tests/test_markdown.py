@@ -44,6 +44,22 @@ def test_generate_markdown_information_register() -> None:
     assert "ГоловнаяОрганизация" in md
 
 
+def test_generate_markdown_role_rights() -> None:
+    path = FIXTURES / "Roles" / "ТестоваяРоль.xml"
+    obj = parse_metadata_file(path, "Role", source_root=FIXTURES)
+    md = generate_markdown(obj)
+    assert "# Роль: ТестоваяРоль" in md
+    assert "## Права" in md
+    assert "**Объектов с правами:** 3" in md
+    assert "## Права: Catalog" in md
+    assert "Номенклатура" in md
+    assert "Read, View" in md
+    assert "## Права: Document" in md
+    assert "ТекущийСотрудник" in md
+    assert "## Права: Configuration" in md
+    assert "ThinClient" in md
+
+
 def test_write_markdown_catalog(tmp_path: Path) -> None:
     path = FIXTURES / "Catalogs" / "Номенклатура.xml"
     obj = parse_metadata_file(path, "Catalog", source_root=FIXTURES)
@@ -63,8 +79,8 @@ def test_index_pipeline_without_embeddings(tmp_path: Path) -> None:
     pipeline = Pipeline(cfg)
     stats = pipeline.index_export(skip_embeddings=True)
 
-    assert stats.objects_total == 5
-    assert stats.objects_updated == 5
+    assert stats.objects_total == 6
+    assert stats.objects_updated == 6
     assert stats.configuration_name == "ТестоваяКонфигурация"
     assert (
         tmp_path / "output" / "docs" / "ТестоваяКонфигурация" / "catalogs" / "Номенклатура.md"
@@ -72,10 +88,10 @@ def test_index_pipeline_without_embeddings(tmp_path: Path) -> None:
     assert cfg.db_path.exists()
 
     objects = pipeline.indexer.list_objects(config_id=pipeline.active_configuration.id)
-    assert len(objects) == 5
+    assert len(objects) == 6
 
     stats2 = pipeline.index_export(skip_embeddings=True)
-    assert stats2.objects_skipped == 5
+    assert stats2.objects_skipped == 6
     assert stats2.objects_updated == 0
     assert stats2.chunks_rebuilt == 0
 

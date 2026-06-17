@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import sys
+from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
@@ -22,6 +23,7 @@ from onec_conf_doc.rag.embeddings import create_embedding_provider
 from onec_conf_doc.rag.embeddings.base import EmbeddingProvider
 from onec_conf_doc.rag.faiss_index import FaissIndex, SearchResult
 from onec_conf_doc.rag.llm import LLMProvider, create_llm_provider
+from onec_conf_doc.rag.role_search import search_roles_by_object
 from onec_conf_doc.rag.search_ranking import (
     apply_name_match_boost,
     hit_score,
@@ -117,19 +119,21 @@ class Pipeline:
     def index_export(
         self,
         *,
+        source: Path | None = None,
         skip_embeddings: bool = False,
         force: bool = False,
         show_progress: bool | None = None,
+        progress_callback: Callable[[str], None] | None = None,
     ) -> IndexStats:
-        progress = use_progress(show_progress)
-        source = self.config.source
+        progress = use_progress(show_progress) if progress_callback is None else False
+        export_source = source or self.config.source
         stats = IndexStats()
 
-        config_path = source / "Configuration.xml"
+        config_path = export_source / "Configuration.xml"
         if config_path.exists():
-            config_info = parse_configuration(config_path, export_root=source)
+            config_info = parse_configuration(config_path, export_root=export_source)
         else:
-            config_info = ConfigurationInfo(export_path=str(source))
+            config_info = ConfigurationInfo(export_path=str(export_source))
             if self.config.configuration:
                 config_info.name = self.config.configuration
 
@@ -137,7 +141,8 @@ class Pipeline:
             msg = "Cannot determine configuration name. Add Configuration.xml to export."
             raise ValueError(msg)
 
-        config_info.source_path = str(config_path if config_path.exists() else source)
+        config_info.source_path = str(config_path if config_path.exists() else export_source)
+        config_info.export_path = str(export_source)
         config_id = self.indexer.upsert_configuration(config_info)
         stored = self.indexer.get_configuration(config_info.name)
         if stored is None:
@@ -152,11 +157,12 @@ class Pipeline:
         docs_dir = self.config.docs_dir_for(config_info.name)
         run_id = self.indexer.start_index_run(config_id)
 
-        refs = scan_export(source)
+        refs = scan_export(export_source)
+        total_refs = len(refs)
         updated_object_ids: list[int] = []
         parse_bar = iter_progress(
             refs,
-            total=len(refs),
+            total=total_refs,
             desc="Объекты",
             unit="obj",
             disable=not progress,
@@ -164,7 +170,7 @@ class Pipeline:
         for ref in parse_bar:
             stats.objects_total += 1
             existing_hash = self.indexer.get_object_hash(config_id, ref.object_type, ref.name)
-            obj = parse_metadata_file(ref.path, ref.object_type, source_root=source)
+            obj = parse_metadata_file(ref.path, ref.object_type, source_root=export_source)
 
             if existing_hash == obj.content_hash:
                 stats.objects_skipped += 1
@@ -178,6 +184,16 @@ class Pipeline:
                 object_id = self.indexer.upsert_object(config_id, obj, md_path)
                 updated_object_ids.append(object_id)
                 stats.objects_updated += 1
+
+            if progress_callback and (
+                stats.objects_total == 1
+                or stats.objects_total == total_refs
+                or stats.objects_total % 100 == 0
+            ):
+                progress_callback(
+                    f"Обработано {stats.objects_total}/{total_refs} объектов "
+                    f"(обновлено {stats.objects_updated}, пропущено {stats.objects_skipped})"
+                )
 
             set_postfix = getattr(parse_bar, "set_postfix", None)
             if set_postfix is not None:
@@ -314,6 +330,7 @@ class Pipeline:
         built_at = datetime.now(UTC).isoformat()
 
         if not chunks:
+            self.indexer.clear_chunk_vector_ids(config_id)
             empty = np.array([], dtype=np.float32).reshape(0, dimension)
             faiss_idx.build(empty, [])
             faiss_idx.save(model=model, built_at=built_at)
@@ -373,6 +390,7 @@ class Pipeline:
             tqdm.write(f"FAISS: сохранено {len(chunk_ids)} векторов", file=sys.stderr)
 
         mapping = {chunk_id: i for i, chunk_id in enumerate(chunk_ids)}
+        self.indexer.clear_chunk_vector_ids(config_id)
         self.indexer.update_chunk_vector_ids(mapping)
         if configuration_name == self.config.configuration:
             self._faiss = faiss_idx
@@ -447,6 +465,24 @@ class Pipeline:
             show_progress=progress,
             force=force,
             stats=stats,
+        )
+
+    def search_roles_by_object(
+        self,
+        object_name: str,
+        *,
+        rights: str | None = None,
+        metadata_type: str | None = None,
+        limit: int = 100,
+    ) -> list[dict[str, object]]:
+        cfg = self.active_configuration
+        role_chunks = self.indexer.get_role_chunks_for_search(cfg.id)
+        return search_roles_by_object(
+            role_chunks,
+            object_name=object_name,
+            rights=rights,
+            metadata_type=metadata_type,
+            limit=limit,
         )
 
     def search(self, query: str, *, top_k: int = 5) -> list[dict[str, object]]:

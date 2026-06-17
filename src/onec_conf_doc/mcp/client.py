@@ -147,6 +147,26 @@ class ConfDocApiClient:
         result = self._request("GET", f"/objects/{object_type}/{name}", params=params or None)
         return cast(dict[str, Any], result)
 
+    def search_roles_by_object(
+        self,
+        object_name: str,
+        *,
+        rights: str | None = None,
+        metadata_type: str | None = None,
+        configuration: str | None = None,
+        limit: int = 100,
+    ) -> list[dict[str, Any]]:
+        params: dict[str, Any] = {"object": object_name, "limit": limit}
+        resolved = self._resolve_configuration(configuration)
+        if resolved:
+            params["configuration"] = resolved
+        if rights:
+            params["rights"] = rights
+        if metadata_type:
+            params["metadata_type"] = metadata_type
+        result = self._request("GET", "/roles/by-object", params=params)
+        return cast(list[dict[str, Any]], result)
+
     def get_object_chunk(
         self,
         object_type: str,

@@ -158,13 +158,19 @@ output/
 
 Провайдеры (`rag/embeddings/`):
 
-| provider | Назначение |
-|----------|------------|
-| `openai` | OpenAI-compatible API (Polza, OpenAI, …) |
-| `ollama` | Локальный Ollama |
-| `sentence_transformers` | Локальные модели без API |
+| provider | Назначение | Типичная модель |
+|----------|------------|-----------------|
+| `sentence_transformers` | Локально, без API (**дефолт** в `config.py` и Docker) | `paraphrase-multilingual-MiniLM-L12-v2` (384 dim) |
+| `openai` | OpenAI-compatible API (Polza, OpenAI, …) | `text-embedding-3-small` (1536 dim) |
+| `ollama` | Локальный Ollama | зависит от модели |
 
-Размерность вектора (`dimension`) определяется провайдером и должна совпадать с FAISS-индексом. При смене модели эмбеддингов выполните `conf-doc embed`.
+**Embeddings и LLM — разные подсистемы.** Индексация (`build_embeddings`) использует только `embeddings.*`. Блок `llm.*` задействуется лишь в `query_rag()` (`POST /query`). При `llm.provider: none` поиск `/search` работает штатно.
+
+Дефолт Docker (`config.docker.example.yaml`) — `sentence_transformers`: не нужен API-ключ, модель кэшируется в томе `model-cache`. Для лучшего качества retrieval на русском и перефразированных запросах переключайтесь на `embeddings.provider: openai` и пересобирайте индекс с `--force` (смена размерности).
+
+Размерность вектора (`dimension`) определяется провайдером и должна совпадать с FAISS-индексом. При смене модели эмбеддингов выполните `conf-doc embed --force`. Использованная модель фиксируется в `chunk_map.json` → `model`.
+
+Тип `Role` исключён из векторизации (`rag/embed_policy.py`); чанки ролей остаются в SQLite для точного поиска (`role_search`).
 
 ## FAISS (векторный индекс)
 

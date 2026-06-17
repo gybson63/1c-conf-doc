@@ -46,19 +46,26 @@ def _pipeline(tmp_path: Path, export: Path | None = None) -> tuple[Pipeline, Moc
     return pipeline, mock
 
 
+def _embeddable_count(pipeline: Pipeline) -> int:
+    config_id = pipeline.active_configuration.id
+    return len(pipeline.indexer.get_chunks_for_embedding(config_id))
+
+
 def test_second_index_skips_unchanged_embeddings(tmp_path: Path) -> None:
     pipeline, mock = _pipeline(tmp_path)
     pipeline.index_export(skip_embeddings=False)
     first_calls = mock.calls
+    embeddable = _embeddable_count(pipeline)
 
     mock.calls = 0
     stats = pipeline.index_export(skip_embeddings=False)
 
     assert stats.objects_skipped == stats.objects_total
     assert stats.chunks_rebuilt == 0
-    assert stats.embeddings_cached == stats.chunks_total
+    assert stats.embeddings_cached == embeddable
     assert stats.embeddings_computed == 0
     assert mock.calls == 0
+    assert first_calls == embeddable
     assert first_calls > 0
 
 
@@ -85,12 +92,13 @@ def test_single_object_change_embeds_only_changed_chunks(tmp_path: Path) -> None
 def test_force_rebuilds_all_embeddings(tmp_path: Path) -> None:
     pipeline, mock = _pipeline(tmp_path)
     pipeline.index_export(skip_embeddings=False)
+    embeddable = _embeddable_count(pipeline)
     mock.calls = 0
 
     stats = pipeline.index_export(skip_embeddings=False, force=True)
-    assert stats.embeddings_computed == stats.chunks_total
+    assert stats.embeddings_computed == embeddable
     assert stats.embeddings_cached == 0
-    assert mock.calls == stats.chunks_total
+    assert mock.calls == embeddable
 
 
 def test_embed_command_uses_cache(tmp_path: Path) -> None:
@@ -152,7 +160,7 @@ def test_chunking_params_change_rebuilds_all_chunks(tmp_path: Path) -> None:
     stats = pipeline.index_export(skip_embeddings=True)
 
     chunk_ids_after = pipeline.indexer.get_chunk_ids_for_config(config_id)
-    assert stats.chunks_rebuilt == 5
+    assert stats.chunks_rebuilt == 6
     assert chunk_ids_before != chunk_ids_after
 
 
@@ -163,6 +171,7 @@ def test_model_change_triggers_full_recompute(tmp_path: Path) -> None:
     mock.calls = 0
 
     pipeline.config.embeddings.model = "model-b"
+    embeddable = _embeddable_count(pipeline)
     stats = pipeline.index_export(skip_embeddings=False)
-    assert stats.embeddings_computed == stats.chunks_total
-    assert mock.calls == stats.chunks_total
+    assert stats.embeddings_computed == embeddable
+    assert mock.calls == embeddable

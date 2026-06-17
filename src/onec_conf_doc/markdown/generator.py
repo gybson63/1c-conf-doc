@@ -7,6 +7,7 @@ from pathlib import Path
 from onec_conf_doc.markdown.templates import (
     format_attributes_table,
     format_tabular_section,
+    role_rights_sections,
     type_label,
 )
 from onec_conf_doc.models.metadata import MetadataObject
@@ -111,6 +112,10 @@ def generate_markdown(
                     "",
                 ]
             )
+
+    if obj.role_rights is not None:
+        for title, content in role_rights_sections(obj.role_rights):
+            lines.extend([f"## {title}", "", content, ""])
 
     if obj.help_pages:
         lines.extend(["## Справка", ""])

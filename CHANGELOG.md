@@ -11,6 +11,15 @@
 
 ### Added
 
+- Веб-интерфейс на `/` — статус сервера, список конфигураций, добавление (путь на сервере или ZIP), семантический поиск, просмотр логов.
+- Страница `/object/{type}/{name}` в веб-UI — просмотр всех чанков объекта; ссылка «Все чанки объекта» в результатах поиска.
+- `POST /configurations/index` — фоновая индексация по пути к выгрузке на сервере; `POST /configurations/upload` — загрузка ZIP (зависимость `python-multipart`).
+- `GET /configurations/jobs`, `GET /configurations/jobs/{id}` — статус и логи задач индексации; `GET /logs` — буфер логов сервера.
+- `import_roots` в config.yaml — разрешённые каталоги для индексации по пути.
+- Расширенный `GET /health`: версия, состояние БД, число конфигураций.
+- `POST /reindex` — опциональные `source` и `async_job` для переиндексации и фонового запуска.
+- `GET /roles/by-object` — точный поиск ролей по имени объекта метаданных и правам (без векторов); MCP-инструмент `conf_doc_search_roles_by_object`.
+- Парсинг `Roles/{Имя}/Ext/Rights.xml`: права ролей попадают в markdown (секции `## Права` и `## Права: {тип}`) и чанки.
 - Pre-commit hook `check-changelog`: при изменениях кода в `src/onec_conf_doc/` требует обновление `CHANGELOG.md`.
 - Документация [docs/DOCKER_UPDATE.md](docs/DOCKER_UPDATE.md) — процедура обновления Docker-контейнера после значимых изменений.
 - Docker: `Dockerfile`, `docker-compose.yml`, `config.docker.example.yaml` — backend для MCP.
@@ -20,9 +29,11 @@
 
 ### Changed
 
+- Роли (`Role`) исключены из векторной индексации: чанки остаются для точного поиска, FAISS их не содержит.
 - Документация и позиционирование: MCP — основной сценарий; Docker — backend для MCP; `mcp.json.docker.example`.
 - Docker по умолчанию на хосте слушает порт **8050** (`CONF_DOC_PORT`), локальная отладка — **8000**.
 - Документация: раздел «Поиск и RAG» (README, ARCHITECTURE, skill) — embeddings vs LLM, настройка `llm.provider`, когда нужен `/query`.
+- Документация: раздел «Выбор провайдера эмбеддингов» — дефолт Docker (`sentence_transformers`), сравнение с API (`text-embedding-3-small`), переключение и `--force`.
 
 ### Fixed
 

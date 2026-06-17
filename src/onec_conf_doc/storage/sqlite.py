@@ -10,6 +10,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 from onec_conf_doc.models.metadata import ConfigurationInfo, MetadataObject
+from onec_conf_doc.rag.embed_policy import EMBED_EXCLUDED_OBJECT_TYPES
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS configurations (
@@ -645,6 +646,19 @@ class SQLiteIndexer:
                 ids.append(int(cur.lastrowid))
         return ids
 
+    def clear_chunk_vector_ids(self, config_id: int) -> None:
+        with self.connect() as conn:
+            conn.execute(
+                """
+                UPDATE chunks
+                SET vector_id = NULL
+                WHERE object_id IN (
+                    SELECT id FROM metadata_objects WHERE config_id = ?
+                )
+                """,
+                (config_id,),
+            )
+
     def update_chunk_vector_ids(self, mapping: dict[int, int]) -> None:
         with self.connect() as conn:
             for chunk_id, vector_id in mapping.items():
@@ -654,18 +668,43 @@ class SQLiteIndexer:
                 )
 
     def get_chunks_for_embedding(self, config_id: int) -> list[tuple[int, str, str]]:
+        excluded = sorted(EMBED_EXCLUDED_OBJECT_TYPES)
+        placeholders = ", ".join("?" for _ in excluded)
         with self.connect() as conn:
             rows = conn.execute(
-                """
+                f"""
                 SELECT c.id, c.text, c.content_hash
                 FROM chunks c
                 JOIN metadata_objects o ON o.id = c.object_id
                 WHERE o.config_id = ?
+                  AND o.object_type NOT IN ({placeholders})
                 ORDER BY c.id
+                """,
+                (config_id, *excluded),
+            ).fetchall()
+        return [(int(r["id"]), str(r["text"]), str(r["content_hash"])) for r in rows]
+
+    def get_role_chunks_for_search(self, config_id: int) -> list[dict[str, str]]:
+        with self.connect() as conn:
+            rows = conn.execute(
+                """
+                SELECT o.name AS role, o.synonym, o.md_path, c.text
+                FROM metadata_objects o
+                JOIN chunks c ON c.object_id = o.id
+                WHERE o.config_id = ? AND o.object_type = 'Role'
+                ORDER BY o.name, c.chunk_index
                 """,
                 (config_id,),
             ).fetchall()
-        return [(int(r["id"]), str(r["text"]), str(r["content_hash"])) for r in rows]
+        return [
+            {
+                "role": str(r["role"]),
+                "synonym": str(r["synonym"] or ""),
+                "md_path": str(r["md_path"] or ""),
+                "text": str(r["text"]),
+            }
+            for r in rows
+        ]
 
     def find_objects_by_exact_name(
         self,

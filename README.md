@@ -23,6 +23,8 @@ docker compose up -d
 
 Проверка: `http://localhost:8050/health` (Docker). Локальная отладка: `conf-doc serve` на порту **8000**.
 
+**Веб-интерфейс:** `http://localhost:8050/` (Docker) или `http://localhost:8000/` (локально) — статус сервера, список конфигураций, добавление выгрузки (путь `/data/export/...` или ZIP), семантический поиск, логи индексации. Не открывайте порт наружу без reverse proxy и аутентификации.
+
 Локально без Docker: `pip install -e ".[embeddings]"`, `conf-doc index`, `conf-doc serve`.
 
 ### 2. Cursor: MCP-клиент
@@ -47,6 +49,7 @@ pip install -e ".[embeddings,mcp]"
 - Парсинг выгрузки конфигуратора: справочники, документы, перечисления, регистры и др.
 - Семантический поиск (эмбеддинги + FAISS), структурный поиск в SQLite
 - HTTP API и CLI — для индексации, администрирования и разработки
+- **Веб-UI** — health, конфигурации, индексация по пути или ZIP, поиск, логи
 
 ## Docker
 
@@ -270,6 +273,68 @@ curl -s -X POST "$CONF_DOC_API_URL/query" \
 - conf-doc используют не только из Cursor (скрипты, другие HTTP-клиенты).
 
 Если `/query` или `conf_doc_query` возвращают 503 — это ожидаемо при `llm.provider: none`. Используйте `/search` и `/objects/.../chunks/...`.
+
+## Выбор провайдера эмбеддингов
+
+Для **семантического поиска** (`/search`) используется блок `embeddings` в `config.yaml` — это **не** LLM из раздела `llm` (см. выше). При индексации вызывается embedding-модель; chat-модель для `/query` не нужна и по умолчанию отключена.
+
+### Почему Docker по умолчанию — локальная модель
+
+[`config.docker.example.yaml`](config.docker.example.yaml) задаёт:
+
+```yaml
+embeddings:
+  provider: sentence_transformers
+  model: paraphrase-multilingual-MiniLM-L12-v2
+```
+
+Так можно индексировать **без API-ключа, без сети и без оплаты**: модель скачивается в Docker-том `model-cache`. Образ собирается с `EXTRAS=embeddings` (без пакета `openai`).
+
+Для продакшена с максимальным качеством поиска переключитесь на API-эмбеддинги — см. ниже.
+
+### Сравнение вариантов
+
+| | `sentence_transformers` (дефолт Docker) | `openai` (`text-embedding-3-small` и др.) |
+|---|--------------------------------------|-------------------------------------------|
+| Где считается | CPU/GPU на сервере | OpenAI-compatible API (OpenAI, Polza, …) |
+| Размерность | 384 (MiniLM) | 1536 (`embedding-3-small`) |
+| Качество retrieval | достаточно для простых запросов | обычно заметно лучше на перефразах и косвенных формулировках |
+| Стоимость | 0 | оплата за токены API |
+| Зависимости | `pip install ...[embeddings]` | `...[embeddings,openai]` + ключ |
+
+`text-embedding-3-small` — **embedding**-модель (векторизация текста), не chat LLM. В conf-doc она настраивается через `embeddings.provider: openai`, а не через `llm`.
+
+### Переключение на API-эмбеддинги
+
+1. Пересоберите образ с OpenAI extra:
+
+   ```bash
+   docker compose build --build-arg EXTRAS="embeddings,openai"
+   ```
+
+2. В `config.yaml`:
+
+   ```yaml
+   embeddings:
+     provider: openai
+     base_url: https://polza.ai/api/v1   # или https://api.openai.com/v1
+     model: text-embedding-3-small
+     openai_api_key: your-key-here
+   ```
+
+3. **Полная пересборка векторов** — размерность меняется, старый FAISS несовместим:
+
+   ```bash
+   docker compose run --rm conf-doc index --force
+   ```
+
+Модель, использованная при индексации, записывается в `output/vectors/{ConfigurationName}/chunk_map.json` (поле `model`).
+
+### Кэш и повторная индексация
+
+При повторном `index` без изменений чанков векторы берутся из SQLite-кэша (`embedding_cache`) — в статистике будет `embeddings_cached > 0`, `embeddings_computed = 0`, вызовов API не будет. Это нормально: FAISS пересобирается из кэша.
+
+Роли (`Role`) **не попадают в FAISS** — для них точный поиск по правам: `GET /roles/by-object`, MCP `conf_doc_search_roles_by_object`.
 
 ## Структура output/
 
