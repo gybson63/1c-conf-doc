@@ -203,12 +203,20 @@ async function loadConfigurations() {
         <td>${c.objects_count}</td>
         <td>${escapeHtml(c.indexed_at || "—")}</td>
         <td class="path" title="${escapeHtml(c.export_path)}">${escapeHtml(c.export_path)}</td>
-        <td><button class="btn secondary btn-reindex" data-path="${escapeHtml(c.export_path)}">Переиндексировать</button></td>
+        <td>
+          <div class="btn-group">
+            <button class="btn secondary btn-reindex" data-path="${escapeHtml(c.export_path)}">Переиндексировать</button>
+            <button class="btn danger btn-delete" data-name="${escapeHtml(c.name)}">Удалить</button>
+          </div>
+        </td>
       </tr>`
       )
       .join("");
     tbody.querySelectorAll(".btn-reindex").forEach((btn) => {
       btn.addEventListener("click", () => reindexConfig(btn.dataset.path));
+    });
+    tbody.querySelectorAll(".btn-delete").forEach((btn) => {
+      btn.addEventListener("click", () => deleteConfig(btn.dataset.name));
     });
   } catch (err) {
     tbody.innerHTML = `<tr><td colspan="7" class="muted">Ошибка: ${escapeHtml(err.message)}</td></tr>`;
@@ -240,6 +248,24 @@ async function reindexConfig(exportPath) {
     selectedJobId = data.job_id;
     pollJob(data.job_id, null);
     refreshJobs();
+  } catch (err) {
+    alert(`Ошибка: ${err.message}`);
+  }
+}
+
+async function deleteConfig(name) {
+  if (!name) return;
+  if (
+    !confirm(
+      `Удалить конфигурацию «${name}» из базы?\nMarkdown и FAISS-индекс на диске также будут удалены.`
+    )
+  ) {
+    return;
+  }
+  try {
+    await api(`/configurations/${encodeURIComponent(name)}`, { method: "DELETE" });
+    await loadConfigurations();
+    loadHealth();
   } catch (err) {
     alert(`Ошибка: ${err.message}`);
   }

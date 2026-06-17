@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import os
 from typing import Any, cast
+from urllib.parse import quote
 
 import httpx
 
@@ -89,6 +90,20 @@ class ConfDocApiClient:
     def list_configurations(self) -> list[dict[str, Any]]:
         result = self._request("GET", "/configurations")
         return cast(list[dict[str, Any]], result)
+
+    def delete_configuration(
+        self,
+        name: str,
+        *,
+        remove_files: bool = True,
+    ) -> dict[str, Any]:
+        params: dict[str, Any] = {"remove_files": remove_files}
+        result = self._request(
+            "DELETE",
+            f"/configurations/{quote(name, safe='')}",
+            params=params,
+        )
+        return cast(dict[str, Any], result)
 
     def search(
         self,

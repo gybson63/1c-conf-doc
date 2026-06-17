@@ -18,6 +18,8 @@ if hasattr(sys.stderr, "reconfigure"):
     sys.stderr.reconfigure(encoding="utf-8", errors="replace")
 
 app = typer.Typer(help="Документация из конфигурации 1С")
+configurations_app = typer.Typer(help="Конфигурации в базе данных")
+app.add_typer(configurations_app, name="configurations")
 
 
 def _apply_configuration(cfg: AppConfig, configuration: str | None) -> None:
@@ -25,11 +27,14 @@ def _apply_configuration(cfg: AppConfig, configuration: str | None) -> None:
         cfg.configuration = configuration
 
 
-@app.command("configurations")
-def configurations_cmd(
+@configurations_app.callback(invoke_without_command=True)
+def configurations_list_cmd(
+    ctx: typer.Context,
     config: Annotated[Path | None, typer.Option(help="Путь к config.yaml")] = None,
 ) -> None:
     """Список конфигураций в базе данных."""
+    if ctx.invoked_subcommand is not None:
+        return
     cfg = load_config(config)
     pipeline = Pipeline(cfg)
     rows = pipeline.indexer.list_configurations()
@@ -44,6 +49,36 @@ def configurations_cmd(
             f"объектов: {row.objects_count}, {row.indexed_at})"
         )
         typer.echo(f"  export: {row.export_path}")
+
+
+@configurations_app.command("delete")
+def configurations_delete_cmd(
+    name: str = typer.Argument(..., help="Имя конфигурации"),
+    config: Annotated[Path | None, typer.Option(help="Путь к config.yaml")] = None,
+    yes: Annotated[bool, typer.Option("--yes", "-y", help="Без подтверждения")] = False,
+    keep_files: Annotated[bool, typer.Option(help="Оставить markdown и FAISS на диске")] = False,
+) -> None:
+    """Удалить конфигурацию из базы (и с диска, если не указан --keep-files)."""
+    cfg = load_config(config)
+    pipeline = Pipeline(cfg)
+    resolved = pipeline.indexer.resolve_configuration(name)
+    if resolved is None:
+        from onec_conf_doc.config_names import configuration_not_found_message
+
+        candidates = [c.name for c in pipeline.indexer.list_configurations()]
+        typer.echo(configuration_not_found_message(name, candidates), err=True)
+        raise typer.Exit(code=1)
+    if not yes and not typer.confirm(
+        f"Удалить конфигурацию «{resolved.name}» ({resolved.objects_count} объектов)?"
+    ):
+        raise typer.Abort()
+    result = pipeline.delete_configuration(resolved.name, remove_files=not keep_files)
+    typer.echo(f"Удалено: {result.name}")
+    if not keep_files:
+        if result.docs_removed:
+            typer.echo("  markdown: удалён")
+        if result.vectors_removed:
+            typer.echo("  FAISS: удалён")
 
 
 @app.command("index")

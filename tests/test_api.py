@@ -95,3 +95,26 @@ def test_api_health_and_objects(tmp_path) -> None:
     )
     assert reindex_source.status_code == 200
     assert reindex_source.json()["configuration_name"] == "ТестоваяКонфигурация"
+
+
+def test_delete_configuration(tmp_path) -> None:
+    output = tmp_path / "output"
+    cfg = AppConfig(source=FIXTURES, output=output)
+    app = create_app(cfg)
+    client = TestClient(app)
+
+    client.post("/reindex", json={"skip_embeddings": True})
+    config_name = "ТестоваяКонфигурация"
+    assert len(client.get("/configurations").json()) == 1
+    assert (output / "docs" / config_name).is_dir()
+
+    deleted = client.delete(f"/configurations/{config_name}")
+    assert deleted.status_code == 200
+    body = deleted.json()
+    assert body["name"] == config_name
+    assert body["docs_removed"] is True
+    assert client.get("/configurations").json() == []
+    assert not (output / "docs" / config_name).exists()
+
+    missing = client.delete(f"/configurations/{config_name}")
+    assert missing.status_code == 404

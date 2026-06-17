@@ -11,6 +11,8 @@
 
 ### Added
 
+- Удаление конфигурации из базы: `DELETE /configurations/{name}`, `conf-doc configurations delete`, кнопка в веб-UI; MCP `conf_doc_delete_configuration`. По умолчанию удаляются также markdown и FAISS на диске.
+
 ### Changed
 
 ### Fixed

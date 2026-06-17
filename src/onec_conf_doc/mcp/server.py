@@ -71,6 +71,23 @@ def create_mcp_server(client: ConfDocApiClient | None = None) -> Any:
             return _error_message(exc)
 
     @mcp.tool()
+    def conf_doc_delete_configuration(
+        name: str,
+        remove_files: bool = True,
+    ) -> JsonText:
+        """Удалить конфигурацию из базы conf-doc (и markdown/FAISS на диске).
+
+        Args:
+            name: Имя конфигурации из list_configurations.
+            remove_files: True — удалить каталоги docs/ и vectors/ на сервере.
+        """
+        try:
+            with _client() as api:
+                return _dump(api.delete_configuration(name, remove_files=remove_files))
+        except Exception as exc:  # noqa: BLE001
+            return _error_message(exc)
+
+    @mcp.tool()
     def conf_doc_search(
         query: str,
         top_k: int = 5,

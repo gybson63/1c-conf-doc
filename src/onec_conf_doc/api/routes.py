@@ -116,6 +116,23 @@ def create_router() -> APIRouter:
             for c in pipeline.indexer.list_configurations()
         ]
 
+    @router.delete("/configurations/{name}")
+    def delete_configuration(
+        name: str,
+        request: Request,
+        remove_files: bool = Query(default=True),
+    ) -> dict[str, Any]:
+        pipeline = get_pipeline(request)
+        try:
+            result = pipeline.delete_configuration(name, remove_files=remove_files)
+        except ValueError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        return {
+            "name": result.name,
+            "docs_removed": result.docs_removed,
+            "vectors_removed": result.vectors_removed,
+        }
+
     @router.get("/configurations/jobs")
     def list_jobs(
         request: Request,

@@ -489,6 +489,10 @@ class SQLiteIndexer:
         cfg = self.get_configuration(name)
         return cfg.id if cfg else None
 
+    def delete_configuration(self, config_id: int) -> None:
+        with self.connect() as conn:
+            conn.execute("DELETE FROM configurations WHERE id = ?", (config_id,))
+
     def get_configuration_chunking_hash(self, config_id: int) -> str:
         with self.connect() as conn:
             row = conn.execute(

@@ -119,6 +119,7 @@ def test_mcp_tools_registered() -> None:
     expected = {
         "conf_doc_health",
         "conf_doc_list_configurations",
+        "conf_doc_delete_configuration",
         "conf_doc_search",
         "conf_doc_search_roles_by_object",
         "conf_doc_list_objects",

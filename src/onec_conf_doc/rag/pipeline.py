@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import shutil
 import sys
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -31,6 +32,13 @@ from onec_conf_doc.rag.search_ranking import (
     query_match_strength,
 )
 from onec_conf_doc.storage.sqlite import SQLiteIndexer, StoredConfiguration
+
+
+@dataclass
+class DeleteConfigurationResult:
+    name: str
+    docs_removed: bool
+    vectors_removed: bool
 
 
 @dataclass
@@ -115,6 +123,39 @@ class Pipeline:
         if self._llm is None:
             self._llm = create_llm_provider(self.config.llm)
         return self._llm
+
+    def delete_configuration(
+        self,
+        name: str,
+        *,
+        remove_files: bool = True,
+    ) -> DeleteConfigurationResult:
+        cfg = self.indexer.resolve_configuration(name)
+        if cfg is None:
+            from onec_conf_doc.config_names import configuration_not_found_message
+
+            candidates = [c.name for c in self.indexer.list_configurations()]
+            raise ValueError(configuration_not_found_message(name, candidates))
+
+        docs_dir = self.config.docs_dir_for(cfg.name)
+        vectors_dir = self.config.vectors_dir_for(cfg.name)
+        self.indexer.delete_configuration(cfg.id)
+
+        docs_removed = False
+        vectors_removed = False
+        if remove_files:
+            docs_removed = _remove_tree(docs_dir)
+            vectors_removed = _remove_tree(vectors_dir)
+
+        if self._active_config is not None and self._active_config.id == cfg.id:
+            self._active_config = None
+        self._faiss = None
+
+        return DeleteConfigurationResult(
+            name=cfg.name,
+            docs_removed=docs_removed,
+            vectors_removed=vectors_removed,
+        )
 
     def index_export(
         self,
@@ -593,3 +634,10 @@ class Pipeline:
             "md_path": row.get("md_path", ""),
             "chunk_index": row.get("chunk_index", 0),
         }
+
+
+def _remove_tree(path: Path) -> bool:
+    if path.is_dir():
+        shutil.rmtree(path)
+        return True
+    return False
