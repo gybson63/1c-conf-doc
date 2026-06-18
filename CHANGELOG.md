@@ -11,6 +11,16 @@
 
 ### Added
 
+### Changed
+
+### Fixed
+
+### Removed
+
+## [0.4.0] - 2026-06-18
+
+### Added
+
 - Удаление конфигурации из базы: `DELETE /configurations/{name}`, `conf-doc configurations delete`, кнопка в веб-UI; MCP `conf_doc_delete_configuration`. По умолчанию удаляются также markdown и FAISS на диске.
 - Логи удаления конфигурации в `GET /logs`; веб-UI переключается на вкладку «Логи» и показывает статус операции.
 - Фоновое удаление (`DELETE /configurations/{name}?async_job=true`) с пошаговым прогрессом в job-log для больших конфигураций.
