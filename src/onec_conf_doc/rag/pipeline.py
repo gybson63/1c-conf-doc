@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import logging
 import shutil
 import sys
 from collections.abc import Callable
@@ -33,10 +34,13 @@ from onec_conf_doc.rag.search_ranking import (
 )
 from onec_conf_doc.storage.sqlite import SQLiteIndexer, StoredConfiguration
 
+logger = logging.getLogger("onec_conf_doc")
+
 
 @dataclass
 class DeleteConfigurationResult:
     name: str
+    objects_count: int
     docs_removed: bool
     vectors_removed: bool
 
@@ -129,7 +133,13 @@ class Pipeline:
         name: str,
         *,
         remove_files: bool = True,
+        progress_callback: Callable[[str], None] | None = None,
     ) -> DeleteConfigurationResult:
+        def report(msg: str) -> None:
+            logger.info(msg)
+            if progress_callback is not None:
+                progress_callback(msg)
+
         cfg = self.indexer.resolve_configuration(name)
         if cfg is None:
             from onec_conf_doc.config_names import configuration_not_found_message
@@ -139,20 +149,40 @@ class Pipeline:
 
         docs_dir = self.config.docs_dir_for(cfg.name)
         vectors_dir = self.config.vectors_dir_for(cfg.name)
-        self.indexer.delete_configuration(cfg.id)
+        objects_count = cfg.objects_count
+
+        report(f"Удаление конфигурации «{cfg.name}» (объектов: {objects_count})")
+        self.indexer.delete_configuration(cfg.id, progress=report)
+        report("Запись удалена из SQLite")
 
         docs_removed = False
         vectors_removed = False
         if remove_files:
+            report(f"Удаление markdown: {docs_dir}")
             docs_removed = _remove_tree(docs_dir)
+            if docs_removed:
+                report("Markdown удалён")
+            else:
+                report("Markdown не найден на диске")
+
+            report(f"Удаление FAISS: {vectors_dir}")
             vectors_removed = _remove_tree(vectors_dir)
+            if vectors_removed:
+                report("FAISS удалён")
+            else:
+                report("FAISS не найден на диске")
+        else:
+            report("Файлы на диске сохранены (remove_files=false)")
 
         if self._active_config is not None and self._active_config.id == cfg.id:
             self._active_config = None
         self._faiss = None
 
+        report(f"Конфигурация «{cfg.name}» удалена")
+
         return DeleteConfigurationResult(
             name=cfg.name,
+            objects_count=objects_count,
             docs_removed=docs_removed,
             vectors_removed=vectors_removed,
         )

@@ -105,16 +105,52 @@ def test_delete_configuration(tmp_path) -> None:
 
     client.post("/reindex", json={"skip_embeddings": True})
     config_name = "ТестоваяКонфигурация"
-    assert len(client.get("/configurations").json()) == 1
+    configs_before = client.get("/configurations").json()
+    assert len(configs_before) == 1
+    objects_count = configs_before[0]["objects_count"]
     assert (output / "docs" / config_name).is_dir()
 
     deleted = client.delete(f"/configurations/{config_name}")
     assert deleted.status_code == 200
     body = deleted.json()
     assert body["name"] == config_name
+    assert body["objects_count"] == objects_count
     assert body["docs_removed"] is True
     assert client.get("/configurations").json() == []
     assert not (output / "docs" / config_name).exists()
 
+    logs = client.get("/logs", params={"tail": 50}).json()
+    messages = " ".join(r["message"] for r in logs["records"])
+    assert config_name in messages
+    assert "удалена" in messages.lower()
+
     missing = client.delete(f"/configurations/{config_name}")
     assert missing.status_code == 404
+
+
+def test_delete_configuration_async(tmp_path) -> None:
+    output = tmp_path / "output"
+    cfg = AppConfig(source=FIXTURES, output=output)
+    app = create_app(cfg)
+    client = TestClient(app)
+
+    client.post("/reindex", json={"skip_embeddings": True})
+    config_name = "ТестоваяКонфигурация"
+
+    started = client.delete(f"/configurations/{config_name}?async_job=true")
+    assert started.status_code == 200
+    job_id = started.json()["job_id"]
+
+    import time
+
+    job = started.json()
+    for _ in range(100):
+        job = client.get(f"/configurations/jobs/{job_id}").json()
+        if job["status"] in ("completed", "failed"):
+            break
+        time.sleep(0.05)
+
+    assert job["status"] == "completed"
+    assert job["configuration_name"] == config_name
+    assert client.get("/configurations").json() == []
+    assert any("SQLite" in line for line in job["logs"])

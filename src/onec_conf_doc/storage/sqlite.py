@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import sqlite3
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from contextlib import contextmanager, suppress
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -101,6 +101,10 @@ CREATE INDEX IF NOT EXISTS idx_objects_config ON metadata_objects(config_id);
 CREATE INDEX IF NOT EXISTS idx_objects_type ON metadata_objects(object_type);
 CREATE INDEX IF NOT EXISTS idx_objects_name ON metadata_objects(name);
 CREATE INDEX IF NOT EXISTS idx_chunks_object ON chunks(object_id);
+CREATE INDEX IF NOT EXISTS idx_attributes_object ON attributes(object_id);
+CREATE INDEX IF NOT EXISTS idx_tabular_sections_object ON tabular_sections(object_id);
+CREATE INDEX IF NOT EXISTS idx_enum_values_object ON enum_values(object_id);
+CREATE INDEX IF NOT EXISTS idx_help_pages_object ON help_pages(object_id);
 
 CREATE TABLE IF NOT EXISTS embedding_cache (
     config_id INTEGER NOT NULL REFERENCES configurations(id) ON DELETE CASCADE,
@@ -114,6 +118,31 @@ CREATE TABLE IF NOT EXISTS embedding_cache (
 
 CREATE INDEX IF NOT EXISTS idx_embedding_cache_config ON embedding_cache(config_id);
 """
+
+# Child tables of metadata_objects — bulk-deleted before metadata_objects
+# to avoid per-row ON DELETE CASCADE during configuration removal.
+_CONFIG_OBJECT_CHILD_TABLES = (
+    "attributes",
+    "tabular_sections",
+    "enum_values",
+    "help_pages",
+    "chunks",
+)
+
+_BULK_DELETE_TABLE_LABELS: dict[str, str] = {
+    "attributes": "реквизиты",
+    "tabular_sections": "табличные части",
+    "enum_values": "значения перечислений",
+    "help_pages": "справка",
+    "chunks": "чанки",
+}
+
+_OBJECT_ID_INDEXES = (
+    "CREATE INDEX IF NOT EXISTS idx_attributes_object ON attributes(object_id)",
+    "CREATE INDEX IF NOT EXISTS idx_tabular_sections_object ON tabular_sections(object_id)",
+    "CREATE INDEX IF NOT EXISTS idx_enum_values_object ON enum_values(object_id)",
+    "CREATE INDEX IF NOT EXISTS idx_help_pages_object ON help_pages(object_id)",
+)
 
 MIGRATIONS = (
     "ALTER TABLE configurations ADD COLUMN synonym TEXT NOT NULL DEFAULT ''",
@@ -151,9 +180,30 @@ class SQLiteIndexer:
 
     @contextmanager
     def connect(self) -> Iterator[sqlite3.Connection]:
-        conn = sqlite3.connect(self.db_path)
+        conn = sqlite3.connect(self.db_path, timeout=30.0)
         conn.row_factory = sqlite3.Row
         conn.execute("PRAGMA foreign_keys = ON")
+        conn.execute("PRAGMA journal_mode = WAL")
+        conn.execute("PRAGMA busy_timeout = 30000")
+        try:
+            yield conn
+            conn.commit()
+        except Exception:
+            conn.rollback()
+            raise
+        finally:
+            conn.close()
+
+    @contextmanager
+    def _connect_bulk_delete(self) -> Iterator[sqlite3.Connection]:
+        """Connection for bulk delete: FK checks off before any DML (see SQLite pragma rules)."""
+        conn = sqlite3.connect(self.db_path, timeout=30.0)
+        conn.row_factory = sqlite3.Row
+        conn.execute("PRAGMA foreign_keys = OFF")
+        conn.execute("PRAGMA journal_mode = WAL")
+        conn.execute("PRAGMA busy_timeout = 30000")
+        conn.execute("PRAGMA synchronous = OFF")
+        conn.execute("PRAGMA temp_store = MEMORY")
         try:
             yield conn
             conn.commit()
@@ -172,6 +222,8 @@ class SQLiteIndexer:
         for sql in MIGRATIONS:
             with suppress(sqlite3.OperationalError):
                 conn.execute(sql)
+        for sql in _OBJECT_ID_INDEXES:
+            conn.execute(sql)
         conn.execute(
             "CREATE UNIQUE INDEX IF NOT EXISTS idx_configurations_name ON configurations(name)"
         )
@@ -489,9 +541,63 @@ class SQLiteIndexer:
         cfg = self.get_configuration(name)
         return cfg.id if cfg else None
 
-    def delete_configuration(self, config_id: int) -> None:
+    def delete_configuration(
+        self,
+        config_id: int,
+        *,
+        progress: Callable[[str], None] | None = None,
+    ) -> None:
+        def step(msg: str) -> None:
+            if progress is not None:
+                progress(msg)
+
         with self.connect() as conn:
+            row = conn.execute(
+                "SELECT count(*) FROM metadata_objects WHERE config_id = ?",
+                (config_id,),
+            ).fetchone()
+            objects_count = int(row[0]) if row else 0
+
+        step(f"Удаление из SQLite ({objects_count} объектов)...")
+
+        with self._connect_bulk_delete() as conn:
+            conn.execute(
+                "CREATE TEMP TABLE IF NOT EXISTS _del_obj_ids "
+                "(object_id INTEGER PRIMARY KEY) WITHOUT ROWID"
+            )
+            conn.execute("DELETE FROM _del_obj_ids")
+            conn.execute(
+                "INSERT OR IGNORE INTO _del_obj_ids "
+                "SELECT id FROM metadata_objects WHERE config_id = ?",
+                (config_id,),
+            )
+
+            step("  кэш эмбеддингов")
+            conn.execute("DELETE FROM embedding_cache WHERE config_id = ?", (config_id,))
+
+            for table in _CONFIG_OBJECT_CHILD_TABLES:
+                step(f"  {_BULK_DELETE_TABLE_LABELS.get(table, table)}")
+                conn.execute(
+                    f"""
+                    DELETE FROM {table}
+                    WHERE rowid IN (
+                        SELECT t.rowid
+                        FROM {table} AS t
+                        INNER JOIN _del_obj_ids AS d ON d.object_id = t.object_id
+                    )
+                    """
+                )
+
+            step("  объекты метаданных")
+            conn.execute("DELETE FROM metadata_objects WHERE config_id = ?", (config_id,))
+
+            step("  история индексации")
+            conn.execute("DELETE FROM index_runs WHERE config_id = ?", (config_id,))
+
+            step("  запись конфигурации")
             conn.execute("DELETE FROM configurations WHERE id = ?", (config_id,))
+
+            conn.execute("DROP TABLE IF EXISTS _del_obj_ids")
 
     def get_configuration_chunking_hash(self, config_id: int) -> str:
         with self.connect() as conn:

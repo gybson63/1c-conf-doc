@@ -134,6 +134,12 @@ main {
   cursor: not-allowed;
 }
 
+.btn.secondary:disabled,
+.btn.danger:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
 .btn.secondary {
   background: var(--surface2);
   color: var(--text);
@@ -488,6 +494,7 @@ td.path {
 .job-status-badge.failed { background: rgba(245, 101, 101, 0.2); color: var(--error); }
 .job-status-badge.indexing,
 .job-status-badge.extracting,
+.job-status-badge.deleting,
 .job-status-badge.pending { background: rgba(61, 139, 253, 0.2); color: var(--accent); }
 
 .log-output {

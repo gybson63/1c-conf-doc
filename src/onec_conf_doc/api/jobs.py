@@ -16,7 +16,7 @@ from typing import Any
 
 from onec_conf_doc.api.upload import UploadError, safe_extract_zip, validate_source_path
 from onec_conf_doc.config import AppConfig
-from onec_conf_doc.rag.pipeline import IndexStats, Pipeline
+from onec_conf_doc.rag.pipeline import DeleteConfigurationResult, IndexStats, Pipeline
 
 logger = logging.getLogger("onec_conf_doc.jobs")
 
@@ -27,6 +27,7 @@ class JobStatus(StrEnum):
     PENDING = "pending"
     EXTRACTING = "extracting"
     INDEXING = "indexing"
+    DELETING = "deleting"
     COMPLETED = "completed"
     FAILED = "failed"
 
@@ -35,6 +36,7 @@ class JobType(StrEnum):
     PATH = "path"
     ZIP = "zip"
     REINDEX = "reindex"
+    DELETE = "delete"
 
 
 @dataclass
@@ -131,6 +133,15 @@ def _stats_to_dict(stats: IndexStats) -> dict[str, Any]:
         "chunks_rebuilt": stats.chunks_rebuilt,
         "embeddings_cached": stats.embeddings_cached,
         "embeddings_computed": stats.embeddings_computed,
+    }
+
+
+def _delete_result_to_dict(result: DeleteConfigurationResult) -> dict[str, Any]:
+    return {
+        "name": result.name,
+        "objects_count": result.objects_count,
+        "docs_removed": result.docs_removed,
+        "vectors_removed": result.vectors_removed,
     }
 
 
@@ -255,6 +266,55 @@ def start_reindex_job(
 
     def worker() -> None:
         run_index_job(store, job, pipeline, export_root)
+
+    threading.Thread(target=worker, daemon=True).start()
+    return job
+
+
+def run_delete_job(
+    store: JobStore,
+    job: Job,
+    pipeline: Pipeline,
+    name: str,
+    *,
+    remove_files: bool = True,
+) -> None:
+    def progress_callback(message: str) -> None:
+        store._append_log(job, message)
+
+    try:
+        job.status = JobStatus.DELETING
+        job.configuration_name = name
+        result = pipeline.delete_configuration(
+            name,
+            remove_files=remove_files,
+            progress_callback=progress_callback,
+        )
+        job.stats = _delete_result_to_dict(result)
+        job.status = JobStatus.COMPLETED
+        store._append_log(
+            job,
+            f"Готово: «{result.name}» удалена ({result.objects_count} объектов)",
+        )
+    except Exception as exc:
+        job.status = JobStatus.FAILED
+        job.error = str(exc)
+        store._append_log(job, f"Ошибка: {exc}")
+        logger.exception("Delete job %s failed", job.id)
+
+
+def start_delete_job(
+    store: JobStore,
+    pipeline: Pipeline,
+    name: str,
+    *,
+    remove_files: bool = True,
+) -> Job:
+    job = store.create(JobType.DELETE, source=name)
+    store._append_log(job, f"Запуск удаления: {name}")
+
+    def worker() -> None:
+        run_delete_job(store, job, pipeline, name, remove_files=remove_files)
 
     threading.Thread(target=worker, daemon=True).start()
     return job

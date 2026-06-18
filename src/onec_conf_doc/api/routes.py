@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import tempfile
 from pathlib import Path
 from typing import Any, cast
@@ -14,6 +15,7 @@ from onec_conf_doc import __version__
 from onec_conf_doc.api.jobs import (
     JobStatus,
     JobStore,
+    start_delete_job,
     start_path_index,
     start_reindex_job,
     start_zip_index,
@@ -22,6 +24,8 @@ from onec_conf_doc.api.logging_buffer import get_log_handler
 from onec_conf_doc.api.upload import UploadError, validate_source_path
 from onec_conf_doc.metadata.odata import build_odata_fields_payload
 from onec_conf_doc.rag.pipeline import Pipeline
+
+logger = logging.getLogger("onec_conf_doc")
 
 
 class ReindexRequest(BaseModel):
@@ -121,14 +125,27 @@ def create_router() -> APIRouter:
         name: str,
         request: Request,
         remove_files: bool = Query(default=True),
+        async_job: bool = Query(default=False),
     ) -> dict[str, Any]:
         pipeline = get_pipeline(request)
+        jobs = get_jobs(request)
+        logger.info(
+            "DELETE /configurations/%s (remove_files=%s, async_job=%s)",
+            name,
+            remove_files,
+            async_job,
+        )
+        if async_job:
+            job = start_delete_job(jobs, pipeline, name, remove_files=remove_files)
+            return {"job_id": job.id, "status": JobStatus.PENDING.value}
         try:
             result = pipeline.delete_configuration(name, remove_files=remove_files)
         except ValueError as exc:
+            logger.warning("Конфигурация не найдена: %s", name)
             raise HTTPException(status_code=404, detail=str(exc)) from exc
         return {
             "name": result.name,
+            "objects_count": result.objects_count,
             "docs_removed": result.docs_removed,
             "vectors_removed": result.vectors_removed,
         }

@@ -34,4 +34,4 @@ RAG (`conf_doc_query`) опционален — см. [README — Поиск и 
 - API (backend MCP): `conf-doc serve`
 - MCP smoke test (Docker): `set CONF_DOC_API_URL=http://localhost:8050` → `conf-doc mcp`
 - Локальный API: `conf-doc serve` (порт 8000)
-- Правила: `.cursor/rules/development-workflow.mdc`
+- Правила: `.cursor/rules/development-workflow.mdc`, `.cursor/rules/ui-polish.mdc` (веб-UI)

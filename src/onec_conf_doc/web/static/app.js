@@ -5,6 +5,11 @@ let logsTimer = null;
 let selectedJobId = null;
 let activeJobPoll = null;
 let configurations = [];
+const ACTIVE_JOB_STATUSES = new Set(["pending", "extracting", "indexing", "deleting"]);
+const pendingConfigOps = {
+  deletes: new Map(),
+  reindexes: new Map(),
+};
 
 const API = "";
 
@@ -37,6 +42,9 @@ function showPanel(name) {
     startLogsPolling();
   } else {
     stopLogsPolling();
+    if (name === "configurations") {
+      loadConfigurations();
+    }
   }
 }
 
@@ -184,42 +192,76 @@ async function loadHealth() {
 
 $("#btn-refresh-health").addEventListener("click", loadHealth);
 
+async function refreshPendingConfigOps() {
+  pendingConfigOps.deletes.clear();
+  pendingConfigOps.reindexes.clear();
+  try {
+    const jobs = await api("/configurations/jobs?limit=50");
+    for (const job of jobs) {
+      if (!ACTIVE_JOB_STATUSES.has(job.status)) continue;
+      if (job.type === "delete") {
+        const name = job.configuration_name || job.source;
+        if (name) pendingConfigOps.deletes.set(name, job.id);
+      } else if (job.type === "reindex" || job.type === "path") {
+        if (job.source) pendingConfigOps.reindexes.set(job.source, job.id);
+      }
+    }
+  } catch (_) {
+    /* keep previous pending state on transient errors */
+  }
+}
+
+function configActionStates(config) {
+  const deleting = pendingConfigOps.deletes.has(config.name);
+  const reindexing = pendingConfigOps.reindexes.has(config.export_path);
+  const busy = deleting || reindexing;
+  return {
+    deleteDisabled: busy,
+    deleteLabel: deleting ? "Удаление…" : "Удалить",
+    reindexDisabled: busy,
+    reindexLabel: reindexing ? "Индексация…" : "Переиндексировать",
+  };
+}
+
 async function loadConfigurations() {
   const tbody = $("#configs-body");
   try {
+    await refreshPendingConfigOps();
     configurations = await api("/configurations");
     fillConfigSelect();
     if (!configurations.length) {
-      tbody.innerHTML = '<tr><td colspan="7" class="muted">Нет проиндексированных конфигураций</td></tr>';
+      tbody.innerHTML = '<tr><td colspan="6" class="muted">Нет проиндексированных конфигураций</td></tr>';
       return;
     }
     tbody.innerHTML = configurations
-      .map(
-        (c) => `
-      <tr>
+      .map((c) => {
+        const actions = configActionStates(c);
+        const reindexDisabled = actions.reindexDisabled ? " disabled" : "";
+        const deleteDisabled = actions.deleteDisabled ? " disabled" : "";
+        return `
+      <tr data-config-name="${escapeHtml(c.name)}">
         <td>${escapeHtml(c.name)}</td>
         <td>${escapeHtml(c.synonym || "—")}</td>
         <td>${escapeHtml(c.version || "—")}</td>
         <td>${c.objects_count}</td>
         <td>${escapeHtml(c.indexed_at || "—")}</td>
-        <td class="path" title="${escapeHtml(c.export_path)}">${escapeHtml(c.export_path)}</td>
         <td>
           <div class="btn-group">
-            <button class="btn secondary btn-reindex" data-path="${escapeHtml(c.export_path)}">Переиндексировать</button>
-            <button class="btn danger btn-delete" data-name="${escapeHtml(c.name)}">Удалить</button>
+            <button class="btn secondary btn-reindex" data-path="${escapeHtml(c.export_path)}"${reindexDisabled}>${actions.reindexLabel}</button>
+            <button class="btn danger btn-delete" data-name="${escapeHtml(c.name)}"${deleteDisabled}>${actions.deleteLabel}</button>
           </div>
         </td>
-      </tr>`
-      )
+      </tr>`;
+      })
       .join("");
     tbody.querySelectorAll(".btn-reindex").forEach((btn) => {
       btn.addEventListener("click", () => reindexConfig(btn.dataset.path));
     });
     tbody.querySelectorAll(".btn-delete").forEach((btn) => {
-      btn.addEventListener("click", () => deleteConfig(btn.dataset.name));
+      btn.addEventListener("click", () => deleteConfig(btn.dataset.name, btn));
     });
   } catch (err) {
-    tbody.innerHTML = `<tr><td colspan="7" class="muted">Ошибка: ${escapeHtml(err.message)}</td></tr>`;
+    tbody.innerHTML = `<tr><td colspan="6" class="muted">Ошибка: ${escapeHtml(err.message)}</td></tr>`;
   }
 }
 
@@ -238,12 +280,14 @@ $("#btn-refresh-configs").addEventListener("click", loadConfigurations);
 
 async function reindexConfig(exportPath) {
   if (!exportPath) return;
+  if (pendingConfigOps.reindexes.has(exportPath)) return;
   try {
     const data = await api("/reindex", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ source: exportPath, skip_embeddings: true, async_job: true }),
     });
+    pendingConfigOps.reindexes.set(exportPath, data.job_id);
     showPanel("logs");
     selectedJobId = data.job_id;
     pollJob(data.job_id, null);
@@ -253,22 +297,77 @@ async function reindexConfig(exportPath) {
   }
 }
 
-async function deleteConfig(name) {
+async function deleteConfig(name, triggerBtn) {
   if (!name) return;
+  if (pendingConfigOps.deletes.has(name)) return;
   if (
     !confirm(
-      `Удалить конфигурацию «${name}» из базы?\nMarkdown и FAISS-индекс на диске также будут удалены.`
+      `Удалить конфигурацию «${name}» из базы?\nMarkdown и FAISS-индекс на диске также будут удалены.\n\nДля больших конфигураций удаление может занять несколько минут — прогресс будет во вкладке «Логи».`
     )
   ) {
     return;
   }
+  const btn = triggerBtn || null;
+  const prevLabel = btn ? btn.textContent : "";
+  if (btn) {
+    btn.disabled = true;
+    btn.textContent = "Запуск…";
+  }
   try {
-    await api(`/configurations/${encodeURIComponent(name)}`, { method: "DELETE" });
-    await loadConfigurations();
-    loadHealth();
+    const data = await api(
+      `/configurations/${encodeURIComponent(name)}?async_job=true`,
+      { method: "DELETE" }
+    );
+    pendingConfigOps.deletes.set(name, data.job_id);
+    showDeleteJobStatus(data.job_id, name);
   } catch (err) {
+    if (btn) {
+      btn.disabled = false;
+      btn.textContent = prevLabel || "Удалить";
+    }
+    showDeleteError(err.message);
     alert(`Ошибка: ${err.message}`);
   }
+}
+
+function showDeleteJobStatus(jobId, name) {
+  const el = $("#configs-action-status");
+  el.classList.remove("hidden", "completed", "failed");
+  el.classList.add("running");
+  el.textContent = `Удаление «${name}»…`;
+  showPanel("logs");
+  selectedJobId = jobId;
+  pollJob(jobId, (job) => {
+    const lastLog = job.logs?.length ? job.logs[job.logs.length - 1] : "";
+    if (job.status === "completed") {
+      el.classList.remove("running");
+      el.classList.add("completed");
+      const count = job.stats?.objects_count ?? "?";
+      el.textContent = `Удалено: ${job.configuration_name || name} (${count} объектов)`;
+    } else if (job.status === "failed") {
+      el.classList.remove("running");
+      el.classList.add("failed");
+      el.textContent = `Ошибка: ${job.error || "неизвестная"}`;
+    } else if (lastLog) {
+      el.textContent = lastLog.replace(/^\[\d{2}:\d{2}:\d{2}\]\s*/, "");
+    } else {
+      el.textContent = `Удаление «${name}»…`;
+    }
+  });
+  refreshJobs();
+}
+
+function showDeleteError(message) {
+  const el = $("#configs-action-status");
+  el.classList.remove("hidden", "completed", "running");
+  el.classList.add("failed");
+  el.textContent = `Ошибка: ${message}`;
+  selectedJobId = null;
+  $("#logs-title").textContent = "Лог сервера";
+  $("#logs-output").innerHTML = "";
+  logsSinceId = 0;
+  showPanel("logs");
+  refreshServerLogs();
 }
 
 $("#form-path").addEventListener("submit", async (e) => {
@@ -383,9 +482,14 @@ function pollJob(jobId, onUpdate) {
       const job = await api(`/configurations/jobs/${jobId}`);
       if (onUpdate) onUpdate(job);
       if (selectedJobId === jobId) renderJobLogs(job);
+      if ($("#panel-configurations").classList.contains("active")) {
+        await refreshPendingConfigOps();
+        applyConfigRowStates();
+      }
       if (job.status === "completed" || job.status === "failed") {
         clearInterval(activeJobPoll);
         activeJobPoll = null;
+        await refreshPendingConfigOps();
         refreshJobs();
         loadConfigurations();
       }
@@ -393,6 +497,25 @@ function pollJob(jobId, onUpdate) {
   };
   tick();
   activeJobPoll = setInterval(tick, 2000);
+}
+
+function applyConfigRowStates() {
+  document.querySelectorAll("#configs-body tr[data-config-name]").forEach((row) => {
+    const name = row.dataset.configName;
+    const config = configurations.find((c) => c.name === name);
+    if (!config) return;
+    const actions = configActionStates(config);
+    const reindexBtn = row.querySelector(".btn-reindex");
+    const deleteBtn = row.querySelector(".btn-delete");
+    if (reindexBtn) {
+      reindexBtn.disabled = actions.reindexDisabled;
+      reindexBtn.textContent = actions.reindexLabel;
+    }
+    if (deleteBtn) {
+      deleteBtn.disabled = actions.deleteDisabled;
+      deleteBtn.textContent = actions.deleteLabel;
+    }
+  });
 }
 
 $("#form-search").addEventListener("submit", async (e) => {

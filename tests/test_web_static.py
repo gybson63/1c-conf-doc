@@ -23,6 +23,7 @@ def test_static_and_index_page(tmp_path) -> None:
     js = client.get("/static/app.js")
     assert js.status_code == 200
     assert "loadHealth" in js.text
+    assert "refreshPendingConfigOps" in js.text
 
     css = client.get("/static/styles.css")
     assert css.status_code == 200
