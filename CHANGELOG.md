@@ -11,6 +11,16 @@
 
 ### Added
 
+### Changed
+
+### Fixed
+
+### Removed
+
+## [0.5.0] - 2026-06-24
+
+### Added
+
 - Постоянные слоты выгрузки: `output/exports/{Имя}/` — канонический путь для каждой конфигурации.
 - API per-configuration: `POST /configurations`, `GET /configurations/{name}`, `POST .../import`, `.../import-path`, `.../detect`, `.../index`, `.../embed`.
 - CLI `conf-doc configurations migrate-exports` — перенос legacy `export_path` (`_upload_*`, `/data/export`) в слот.
