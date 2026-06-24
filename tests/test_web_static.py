@@ -24,9 +24,18 @@ def test_static_and_index_page(tmp_path) -> None:
     assert js.status_code == 200
     assert "loadHealth" in js.text
     assert "refreshPendingConfigOps" in js.text
+    assert "openWizard" in js.text
+    assert "startConfigurationUpdate" in js.text
+    assert "startConfigurationReindex" in js.text
+    assert "resumeActiveJobs" in js.text
+    assert "wizardDetectFromSourcePath" in js.text
+    assert "wizard-overlay" in index.text
+    assert "btn-new-configuration" in index.text
+    assert "panel-add" not in index.text
 
     css = client.get("/static/styles.css")
     assert css.status_code == 200
+    assert "wizard-overlay" in css.text
 
 
 def test_object_page_route(tmp_path) -> None:

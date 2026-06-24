@@ -11,11 +11,48 @@
 
 ### Added
 
+- Постоянные слоты выгрузки: `output/exports/{Имя}/` — канонический путь для каждой конфигурации.
+- API per-configuration: `POST /configurations`, `GET /configurations/{name}`, `POST .../import`, `.../import-path`, `.../detect`, `.../index`, `.../embed`.
+- CLI `conf-doc configurations migrate-exports` — перенос legacy `export_path` (`_upload_*`, `/data/export`) в слот.
+- Веб-мастер на вкладке «Конфигурации»: импорт → проверка → эмбеддинги → индексация; кнопки «+ Новая», **Обновить** и **Переиндексировать**.
+- Автоопределение имени конфигурации из `Configuration.xml` при указании пути к выгрузке в мастере.
+- Документация [docs/CONFIGURATION_SLOTS.md](docs/CONFIGURATION_SLOTS.md) — слоты выгрузки, веб-UI, несколько конфигураций, API.
+- Настройки эмбеддингов в веб-UI (вкладка «Настройки»): выбор локальной модели (sentence-transformers), Ollama или OpenAI-совместимого API.
+- API `GET/PUT /settings/embeddings` — чтение и сохранение провайдера embedding-модели в `config.yaml` (ключ API не возвращается).
+- `POST /settings/embeddings/test` и кнопка «Проверить соединение» в веб-UI — пробный запрос embedding без сохранения настроек.
+- Docker: `config.yaml` смонтирован с правом записи — настройки эмбеддингов из веб-UI сохраняются на хост.
+- В `GET /health` и списке конфигураций — текущая модель эмбеддингов и статус индекса (`ok` / `stale` / `missing`), колонки «Выгрузка» и «Индексация».
+- Настройки эмбеддингов отдельно для каждой конфигурации (`configuration_embeddings` в `config.yaml`, `?configuration=` в API).
+- `POST /configurations/detect` (legacy) и проверка слота `POST /configurations/{name}/detect`.
+- Параметр `expected_configuration` при индексации (legacy endpoints) — отказ до парсинга при несовпадении.
+
 ### Changed
+
+- В таблице конфигураций кнопка «Обновить и индексировать» заменена на **Обновить** и **Переиндексировать**; мастер «+ Новая» — для первичного импорта и полного цикла.
+- Docker по умолчанию собирается с `EXTRAS=embeddings,openai` (пакет `openai` в образе); провайдер эмбеддингов по умолчанию остаётся `sentence_transformers` — OpenAI используется только при явной настройке в `config.yaml` или в мастере индексации.
+- `export_path` в SQLite указывает на `output/exports/{Имя}/`; `job.source` и отслеживание задач в UI — по `configuration_name`.
+- `conf-doc index --configuration Имя` индексирует из слота `exports/{Имя}/`.
+- Удаление конфигурации (`remove_files=true`) также удаляет папку выгрузки в слоте.
+- `data/export` — опциональный read-only staging для привязки к слоту (по умолчанию без копирования) или полного зеркалирования (`mirror: true`).
 
 ### Fixed
 
+- Импорт пути в слот на Windows/Docker: по умолчанию создаётся ссылка `.import_source` вместо копирования гигабайтной выгрузки (ошибка `Directory not empty` и таймаут UI).
+- `GET /configurations/jobs` больше не перехватывается как конфигурация `{name}` — исправлен фантомный слот `jobs` в таблице.
+- Импорт в слот при замене существующей выгрузки на Docker/Windows-томе (`Directory not empty`): копирование через staging и `rm -rf`.
+- Удаление пустого/битого слота без записи в базе; статусы «битая выгрузка» / «не индексировалась» в таблице.
+- Повторная индексация по умолчанию не пропускает эмбеддинги (`skip_embeddings: false` в мастере).
+- Эмбеддинги при индексации: пакетная проверка кэша вместо 17k отдельных SQL-запросов; прогресс батчей в логе задачи.
+- Веб-UI: при активной фоновой задаче восстанавливается строка прогресса над таблицей и подпись «Переиндексация…» на кнопке.
+
+### Deprecated
+
+- `POST /configurations/index`, `POST /configurations/upload`, `POST /reindex` — используйте per-configuration API и веб-мастер.
+
 ### Removed
+
+- Вкладка «Добавить» в веб-UI.
+- Вкладка «Настройки» в веб-UI (embeddings настраиваются в мастере индексации).
 
 ## [0.4.0] - 2026-06-18
 

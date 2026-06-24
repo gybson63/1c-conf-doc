@@ -9,7 +9,7 @@ RUN apt-get update \
 COPY pyproject.toml README.md ./
 COPY src ./src
 
-ARG EXTRAS=embeddings
+ARG EXTRAS=embeddings,openai
 RUN if echo ",${EXTRAS}," | grep -q ",embeddings,"; then \
       pip install --no-cache-dir torch --index-url https://download.pytorch.org/whl/cpu; \
     fi \

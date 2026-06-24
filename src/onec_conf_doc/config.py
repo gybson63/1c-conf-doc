@@ -47,6 +47,7 @@ class AppConfig(BaseModel):
     configuration: str | None = None  # имя из Configuration.xml
     import_roots: list[Path] = Field(default_factory=list)
     embeddings: EmbeddingsConfig = Field(default_factory=EmbeddingsConfig)
+    configuration_embeddings: dict[str, EmbeddingsConfig] = Field(default_factory=dict)
     faiss: FaissConfig = Field(default_factory=FaissConfig)
     chunking: ChunkingConfig = Field(default_factory=ChunkingConfig)
     llm: LLMConfig = Field(default_factory=LLMConfig)
@@ -77,11 +78,18 @@ class AppConfig(BaseModel):
     def exports_dir(self) -> Path:
         return self.output / "exports"
 
+    def export_dir_for(self, configuration_name: str) -> Path:
+        return self.exports_dir() / configuration_name
+
     def resolved_import_roots(self) -> list[Path]:
         if self.import_roots:
             return [p.expanduser().resolve() for p in self.import_roots]
         roots = [self.source.expanduser().resolve().parent, self.exports_dir().resolve()]
         return roots
+
+    def embeddings_for(self, configuration_name: str) -> EmbeddingsConfig:
+        """Per-configuration embeddings override, else global default."""
+        return self.configuration_embeddings.get(configuration_name, self.embeddings)
 
 
 class Settings(BaseSettings):
@@ -97,3 +105,31 @@ def load_config(config_path: Path | None = None) -> AppConfig:
             raw = yaml.safe_load(fh) or {}
         return AppConfig.model_validate(raw)
     return AppConfig()
+
+
+def save_config(config: AppConfig, config_path: Path | None = None) -> Path:
+    """Persist application config to YAML."""
+    path = config_path or Settings().config_path
+    path.parent.mkdir(parents=True, exist_ok=True)
+    data = config.model_dump(mode="json")
+    with path.open("w", encoding="utf-8") as fh:
+        yaml.safe_dump(
+            data,
+            fh,
+            allow_unicode=True,
+            default_flow_style=False,
+            sort_keys=False,
+        )
+    return path
+
+
+def embeddings_settings_public(config: EmbeddingsConfig) -> dict[str, object]:
+    """Embeddings block safe for API responses (no secrets)."""
+    return {
+        "provider": config.provider,
+        "model": config.model,
+        "batch_size": config.batch_size,
+        "base_url": config.base_url,
+        "ollama_base_url": config.ollama_base_url,
+        "has_openai_api_key": bool(config.openai_api_key),
+    }

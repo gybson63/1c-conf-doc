@@ -276,6 +276,13 @@ class SQLiteIndexer:
             assert cur.lastrowid is not None
             return int(cur.lastrowid)
 
+    def update_export_path(self, config_id: int, export_path: str) -> None:
+        with self.connect() as conn:
+            conn.execute(
+                "UPDATE configurations SET export_path = ? WHERE id = ?",
+                (export_path, config_id),
+            )
+
     def get_object_hash(self, config_id: int, object_type: str, name: str) -> str | None:
         with self.connect() as conn:
             row = conn.execute(

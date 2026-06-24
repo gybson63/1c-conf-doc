@@ -13,11 +13,12 @@ from pathlib import Path
 
 import numpy as np
 
-from onec_conf_doc.config import AppConfig
+from onec_conf_doc.config import AppConfig, EmbeddingsConfig
+from onec_conf_doc.export_detect import detect_export_configuration, validate_expected_configuration
+from onec_conf_doc.export_slot import slot_has_export
 from onec_conf_doc.markdown.generator import write_markdown
-from onec_conf_doc.models.metadata import ConfigurationInfo
 from onec_conf_doc.parser.scanner import scan_export
-from onec_conf_doc.parser.xml_parser import parse_configuration, parse_metadata_file
+from onec_conf_doc.parser.xml_parser import parse_metadata_file
 from onec_conf_doc.progress import iter_progress, use_progress
 from onec_conf_doc.rag.chunker import chunk_file
 from onec_conf_doc.rag.embedding_cache import EmbeddingCache
@@ -43,6 +44,7 @@ class DeleteConfigurationResult:
     objects_count: int
     docs_removed: bool
     vectors_removed: bool
+    export_removed: bool = False
 
 
 @dataclass
@@ -65,7 +67,7 @@ class Pipeline:
         self.indexer = SQLiteIndexer(config.db_path)
         self.indexer.init_schema()
         self._embedding_cache = EmbeddingCache(self.indexer)
-        self._embedding_provider: EmbeddingProvider | None = None
+        self._embedding_providers: dict[str, EmbeddingProvider] = {}
         self._faiss: FaissIndex | None = None
         self._llm: LLMProvider | None = None
         self._active_config: StoredConfiguration | None = None
@@ -101,17 +103,33 @@ class Pipeline:
     def active_configuration(self) -> StoredConfiguration:
         return self.resolve_active_configuration()
 
+    def embeddings_config_for(self, configuration_name: str) -> EmbeddingsConfig:
+        return self.config.embeddings_for(configuration_name)
+
+    def embedding_provider_for(self, configuration_name: str) -> EmbeddingProvider:
+        if configuration_name not in self._embedding_providers:
+            self._embedding_providers[configuration_name] = create_embedding_provider(
+                self.embeddings_config_for(configuration_name)
+            )
+        return self._embedding_providers[configuration_name]
+
     @property
     def embedding_provider(self) -> EmbeddingProvider:
-        if self._embedding_provider is None:
-            self._embedding_provider = create_embedding_provider(self.config.embeddings)
-        return self._embedding_provider
+        return self.embedding_provider_for(self.active_configuration.name)
+
+    def reset_embedding_provider(self, configuration_name: str | None = None) -> None:
+        """Drop cached embedding provider(s) and FAISS handle after config change."""
+        if configuration_name is None:
+            self._embedding_providers.clear()
+        else:
+            self._embedding_providers.pop(configuration_name, None)
+        self._faiss = None
 
     def faiss_index_for(self, configuration_name: str) -> FaissIndex:
         return FaissIndex(
             self.config.vectors_dir_for(configuration_name),
             self.config.faiss,
-            self.embedding_provider.dimension,
+            self.embedding_provider_for(configuration_name).dimension,
         )
 
     @property
@@ -142,13 +160,15 @@ class Pipeline:
 
         cfg = self.indexer.resolve_configuration(name)
         if cfg is None:
-            from onec_conf_doc.config_names import configuration_not_found_message
-
-            candidates = [c.name for c in self.indexer.list_configurations()]
-            raise ValueError(configuration_not_found_message(name, candidates))
+            return self._delete_export_slot_only(
+                name,
+                remove_files=remove_files,
+                progress_callback=progress_callback,
+            )
 
         docs_dir = self.config.docs_dir_for(cfg.name)
         vectors_dir = self.config.vectors_dir_for(cfg.name)
+        export_dir = self.config.export_dir_for(cfg.name)
         objects_count = cfg.objects_count
 
         report(f"Удаление конфигурации «{cfg.name}» (объектов: {objects_count})")
@@ -157,6 +177,7 @@ class Pipeline:
 
         docs_removed = False
         vectors_removed = False
+        export_removed = False
         if remove_files:
             report(f"Удаление markdown: {docs_dir}")
             docs_removed = _remove_tree(docs_dir)
@@ -171,6 +192,13 @@ class Pipeline:
                 report("FAISS удалён")
             else:
                 report("FAISS не найден на диске")
+
+            report(f"Удаление выгрузки: {export_dir}")
+            export_removed = _remove_tree(export_dir)
+            if export_removed:
+                report("Выгрузка удалена")
+            else:
+                report("Папка выгрузки не найдена на диске")
         else:
             report("Файлы на диске сохранены (remove_files=false)")
 
@@ -185,12 +213,60 @@ class Pipeline:
             objects_count=objects_count,
             docs_removed=docs_removed,
             vectors_removed=vectors_removed,
+            export_removed=export_removed,
+        )
+
+    def _delete_export_slot_only(
+        self,
+        name: str,
+        *,
+        remove_files: bool = True,
+        progress_callback: Callable[[str], None] | None = None,
+    ) -> DeleteConfigurationResult:
+        def report(msg: str) -> None:
+            logger.info(msg)
+            if progress_callback is not None:
+                progress_callback(msg)
+
+        export_dir = self.config.export_dir_for(name)
+        docs_dir = self.config.docs_dir_for(name)
+        vectors_dir = self.config.vectors_dir_for(name)
+        if not export_dir.is_dir() and not docs_dir.is_dir() and not vectors_dir.is_dir():
+            from onec_conf_doc.config_names import configuration_not_found_message
+
+            candidates = [c.name for c in self.indexer.list_configurations()]
+            raise ValueError(configuration_not_found_message(name, candidates))
+
+        report(f"Удаление слота «{name}» (записи в базе нет)")
+        docs_removed = False
+        vectors_removed = False
+        export_removed = False
+        if remove_files:
+            if docs_dir.is_dir():
+                report(f"Удаление markdown: {docs_dir}")
+                docs_removed = _remove_tree(docs_dir)
+            if vectors_dir.is_dir():
+                report(f"Удаление FAISS: {vectors_dir}")
+                vectors_removed = _remove_tree(vectors_dir)
+            if export_dir.is_dir():
+                report(f"Удаление выгрузки: {export_dir}")
+                export_removed = _remove_tree(export_dir)
+                if export_removed:
+                    report("Слот выгрузки удалён")
+        report(f"Слот «{name}» удалён")
+        return DeleteConfigurationResult(
+            name=name,
+            objects_count=0,
+            docs_removed=docs_removed,
+            vectors_removed=vectors_removed,
+            export_removed=export_removed,
         )
 
     def index_export(
         self,
         *,
         source: Path | None = None,
+        expected_configuration: str | None = None,
         skip_embeddings: bool = False,
         force: bool = False,
         show_progress: bool | None = None,
@@ -200,20 +276,19 @@ class Pipeline:
         export_source = source or self.config.source
         stats = IndexStats()
 
-        config_path = export_source / "Configuration.xml"
-        if config_path.exists():
-            config_info = parse_configuration(config_path, export_root=export_source)
-        else:
-            config_info = ConfigurationInfo(export_path=str(export_source))
-            if self.config.configuration:
-                config_info.name = self.config.configuration
+        config_info = detect_export_configuration(export_source)
+        validate_expected_configuration(config_info, expected_configuration)
+        if slot_has_export(self.config, config_info.name):
+            from onec_conf_doc.export_slot import slot_export_root
 
-        if not config_info.name:
-            msg = "Cannot determine configuration name. Add Configuration.xml to export."
-            raise ValueError(msg)
+            export_root = slot_export_root(self.config, config_info.name)
+            config_info.export_path = str(export_root.resolve())
+        if progress_callback:
+            progress_callback(
+                f"Конфигурация в папке: {config_info.name}"
+                + (f" ({config_info.synonym})" if config_info.synonym else "")
+            )
 
-        config_info.source_path = str(config_path if config_path.exists() else export_source)
-        config_info.export_path = str(export_source)
         config_id = self.indexer.upsert_configuration(config_info)
         stored = self.indexer.get_configuration(config_info.name)
         if stored is None:
@@ -227,8 +302,9 @@ class Pipeline:
 
         docs_dir = self.config.docs_dir_for(config_info.name)
         run_id = self.indexer.start_index_run(config_id)
+        export_root = Path(config_info.export_path)
 
-        refs = scan_export(export_source)
+        refs = scan_export(export_root)
         total_refs = len(refs)
         updated_object_ids: list[int] = []
         parse_bar = iter_progress(
@@ -241,7 +317,7 @@ class Pipeline:
         for ref in parse_bar:
             stats.objects_total += 1
             existing_hash = self.indexer.get_object_hash(config_id, ref.object_type, ref.name)
-            obj = parse_metadata_file(ref.path, ref.object_type, source_root=export_source)
+            obj = parse_metadata_file(ref.path, ref.object_type, source_root=export_root)
 
             if existing_hash == obj.content_hash:
                 stats.objects_skipped += 1
@@ -302,11 +378,12 @@ class Pipeline:
         self.indexer.set_configuration_chunking_hash(config_id, chunking_hash)
 
         embed_force = force
+        emb_cfg = self.embeddings_config_for(config_info.name)
         if not skip_embeddings and not embed_force:
             faiss_probe = self.faiss_index_for(config_info.name)
             if faiss_probe.map_path.exists() and faiss_probe.load():
                 stored_model = faiss_probe.stored_model
-                if stored_model is None or stored_model != self.config.embeddings.model:
+                if stored_model is None or stored_model != emb_cfg.model:
                     embed_force = True
             elif faiss_probe.index_path.exists():
                 embed_force = True
@@ -318,6 +395,7 @@ class Pipeline:
                 show_progress=progress,
                 force=embed_force,
                 stats=stats,
+                progress_callback=progress_callback,
             )
             if embed_total:
                 stats.chunks_total = embed_total
@@ -388,6 +466,7 @@ class Pipeline:
         show_progress: bool = False,
         force: bool = False,
         stats: IndexStats | None = None,
+        progress_callback: Callable[[str], None] | None = None,
     ) -> int:
         if config_id is None or configuration_name is None:
             cfg = self.active_configuration
@@ -396,8 +475,10 @@ class Pipeline:
 
         chunks = self.indexer.get_chunks_for_embedding(config_id)
         faiss_idx = self.faiss_index_for(configuration_name)
-        model = self.config.embeddings.model
-        dimension = self.embedding_provider.dimension
+        emb_cfg = self.embeddings_config_for(configuration_name)
+        provider = self.embedding_provider_for(configuration_name)
+        model = emb_cfg.model
+        dimension = provider.dimension
         built_at = datetime.now(UTC).isoformat()
 
         if not chunks:
@@ -415,17 +496,30 @@ class Pipeline:
         vectors_by_index: list[np.ndarray | None] = [None] * len(chunks)
         cached_count = 0
 
-        for i, (_cid, _text, content_hash) in enumerate(chunks):
-            if not force:
-                cached = cache.get(config_id, content_hash, model)
+        if not force:
+            cached_map = cache.get_many(
+                config_id,
+                [content_hash for _cid, _text, content_hash in chunks],
+                model,
+            )
+            for i, (_cid, _text, content_hash) in enumerate(chunks):
+                cached = cached_map.get(content_hash)
                 if cached is not None:
                     vectors_by_index[i] = cached
                     cached_count += 1
-                    continue
-            miss_indices.append(i)
+                else:
+                    miss_indices.append(i)
+        else:
+            miss_indices = list(range(len(chunks)))
+
+        if progress_callback:
+            progress_callback(
+                f"Эмбеддинги: {len(chunks)} чанков, в кэше {cached_count}, "
+                f"к API {len(miss_indices)}"
+            )
 
         if miss_indices:
-            batch_size = self.config.embeddings.batch_size
+            batch_size = emb_cfg.batch_size
             miss_texts = [chunks[i][1] for i in miss_indices]
             computed_vectors: list[list[float]] = []
             batch_count = (len(miss_texts) + batch_size - 1) // batch_size
@@ -436,9 +530,17 @@ class Pipeline:
                 unit="batch",
                 disable=not show_progress,
             )
-            for start in embed_bar:
+            for batch_no, start in enumerate(embed_bar, start=1):
                 batch = miss_texts[start : start + batch_size]
-                computed_vectors.extend(self.embedding_provider.embed_documents(batch))
+                computed_vectors.extend(provider.embed_documents(batch))
+                if progress_callback and (
+                    batch_no == 1 or batch_no == batch_count or batch_no % 10 == 0
+                ):
+                    done = min(batch_no * batch_size, len(miss_texts))
+                    progress_callback(
+                        f"Эмбеддинги: {done}/{len(miss_texts)} чанков "
+                        f"(батч {batch_no}/{batch_count})"
+                    )
 
             cache_items: list[tuple[str, np.ndarray]] = []
             for j, chunk_index in enumerate(miss_indices):
@@ -494,7 +596,7 @@ class Pipeline:
         if not faiss_idx.load():
             return f"Не удалось загрузить индекс ({index_path}). Выполните: conf-doc embed"
 
-        expected_model = self.config.embeddings.model
+        expected_model = self.embeddings_config_for(cfg.name).model
         if faiss_idx.stored_model is None:
             return (
                 "Индекс векторов без метаданных модели (устаревший формат). "

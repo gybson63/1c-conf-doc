@@ -49,6 +49,23 @@ def test_clear_model(tmp_path: Path) -> None:
     assert cache.get(config_id, "hash1", "model-b") is not None
 
 
+def test_get_many_batch_lookup(tmp_path: Path) -> None:
+    cache, config_id = _cache(tmp_path)
+    v1 = np.array([1.0, 2.0], dtype=np.float32)
+    v2 = np.array([3.0, 4.0], dtype=np.float32)
+    cache.put_batch(
+        config_id,
+        "model-a",
+        2,
+        [("hash1", v1), ("hash2", v2)],
+    )
+
+    found = cache.get_many(config_id, ["hash1", "hash2", "hash3"], "model-a")
+    assert set(found) == {"hash1", "hash2"}
+    np.testing.assert_array_almost_equal(found["hash1"], v1)
+    np.testing.assert_array_almost_equal(found["hash2"], v2)
+
+
 def test_put_batch_rejects_dimension_mismatch(tmp_path: Path) -> None:
     cache, config_id = _cache(tmp_path)
     vector = np.array([1.0, 2.0, 3.0], dtype=np.float32)

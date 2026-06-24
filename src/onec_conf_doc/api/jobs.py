@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import tempfile
 import threading
 import traceback
 import uuid
@@ -14,8 +15,21 @@ from enum import StrEnum
 from pathlib import Path
 from typing import Any
 
+from onec_conf_doc.api.embeddings_settings import (
+    EmbeddingsSettingsUpdate,
+    apply_configuration_embeddings,
+)
 from onec_conf_doc.api.upload import UploadError, safe_extract_zip, validate_source_path
 from onec_conf_doc.config import AppConfig
+from onec_conf_doc.export_detect import detect_export_configuration, validate_expected_configuration
+from onec_conf_doc.export_slot import (
+    ensure_export_slot,
+    import_path_to_slot,
+    import_zip_to_slot,
+    slot_export_root,
+    slot_has_export,
+    validate_slot_name,
+)
 from onec_conf_doc.rag.pipeline import DeleteConfigurationResult, IndexStats, Pipeline
 
 logger = logging.getLogger("onec_conf_doc.jobs")
@@ -36,6 +50,8 @@ class JobType(StrEnum):
     PATH = "path"
     ZIP = "zip"
     REINDEX = "reindex"
+    INDEX = "index"
+    EMBED = "embed"
     DELETE = "delete"
 
 
@@ -47,8 +63,10 @@ class Job:
     source: str = ""
     created_at: str = ""
     configuration_name: str | None = None
+    expected_configuration: str | None = None
     skip_embeddings: bool = False
     force: bool = False
+    embeddings: EmbeddingsSettingsUpdate | None = None
     stats: dict[str, Any] | None = None
     error: str | None = None
     logs: list[str] = field(default_factory=list)
@@ -84,8 +102,11 @@ class JobStore:
         job_type: JobType,
         *,
         source: str = "",
+        configuration_name: str | None = None,
         skip_embeddings: bool = False,
         force: bool = False,
+        expected_configuration: str | None = None,
+        embeddings: EmbeddingsSettingsUpdate | None = None,
     ) -> Job:
         job_id = str(uuid.uuid4())
         job = Job(
@@ -94,8 +115,11 @@ class JobStore:
             status=JobStatus.PENDING,
             source=source,
             created_at=datetime.now(tz=UTC).isoformat(),
+            configuration_name=configuration_name,
             skip_embeddings=skip_embeddings,
             force=force,
+            expected_configuration=expected_configuration,
+            embeddings=embeddings,
         )
         with self._lock:
             self._jobs[job_id] = job
@@ -142,6 +166,7 @@ def _delete_result_to_dict(result: DeleteConfigurationResult) -> dict[str, Any]:
         "objects_count": result.objects_count,
         "docs_removed": result.docs_removed,
         "vectors_removed": result.vectors_removed,
+        "export_removed": result.export_removed,
     }
 
 
@@ -159,6 +184,7 @@ def run_index_job(
         store._append_log(job, f"Индексация: {export_root}")
         stats = pipeline.index_export(
             source=export_root,
+            expected_configuration=job.expected_configuration,
             skip_embeddings=job.skip_embeddings,
             force=job.force,
             show_progress=False,
@@ -179,6 +205,190 @@ def run_index_job(
         logger.exception("Job %s failed", job.id)
 
 
+def run_embed_job(
+    store: JobStore,
+    job: Job,
+    pipeline: Pipeline,
+    configuration_name: str,
+) -> None:
+    def progress_callback(message: str) -> None:
+        store._append_log(job, message)
+
+    try:
+        job.status = JobStatus.INDEXING
+        store._append_log(job, f"Только эмбеддинги: «{configuration_name}»")
+        row = pipeline.indexer.get_configuration(configuration_name)
+        if row is None:
+            msg = f"Конфигурация «{configuration_name}» не найдена в базе"
+            raise ValueError(msg)
+        chunks = pipeline.indexer.count_chunks_for_config(row.id)
+        if chunks == 0:
+            msg = "Нет чанков в базе — сначала выполните полную индексацию"
+            raise ValueError(msg)
+        pipeline._active_config = row
+        pipeline.config.configuration = configuration_name
+        stats = IndexStats(
+            configuration_name=configuration_name,
+            configuration_synonym=row.synonym,
+        )
+        count = pipeline.build_embeddings(
+            row.id,
+            configuration_name,
+            show_progress=False,
+            force=job.force,
+            stats=stats,
+            progress_callback=progress_callback,
+        )
+        job.configuration_name = configuration_name
+        job.stats = _stats_to_dict(stats)
+        job.status = JobStatus.COMPLETED
+        store._append_log(
+            job,
+            f"Готово: {count} векторов, API {stats.embeddings_computed}, "
+            f"кэш {stats.embeddings_cached}",
+        )
+    except Exception as exc:
+        job.status = JobStatus.FAILED
+        job.error = str(exc)
+        store._append_log(job, f"Ошибка: {exc}")
+        logger.exception("Embed job %s failed", job.id)
+
+
+def start_slot_embed(
+    store: JobStore,
+    pipeline: Pipeline,
+    config: AppConfig,
+    configuration_name: str,
+    *,
+    force: bool = False,
+    embeddings: EmbeddingsSettingsUpdate | None = None,
+    config_path: Path | None = None,
+) -> Job:
+    name = validate_slot_name(configuration_name)
+    row = pipeline.indexer.get_configuration(name)
+    if row is None:
+        msg = f"Конфигурация «{name}» не найдена в базе"
+        raise ValueError(msg)
+    if pipeline.indexer.count_chunks_for_config(row.id) == 0:
+        msg = "Нет чанков в базе — сначала выполните полную индексацию"
+        raise ValueError(msg)
+
+    job = store.create(
+        JobType.EMBED,
+        source=name,
+        configuration_name=name,
+        force=force,
+        embeddings=embeddings,
+    )
+
+    def worker() -> None:
+        try:
+            if embeddings is not None:
+                apply_configuration_embeddings(
+                    config,
+                    pipeline,
+                    name,
+                    embeddings,
+                    config_path=config_path,
+                )
+                store._append_log(job, f"Настройки эмбеддингов сохранены для «{name}»")
+            run_embed_job(store, job, pipeline, name)
+        except Exception as exc:
+            if job.status not in (JobStatus.COMPLETED, JobStatus.FAILED):
+                job.status = JobStatus.FAILED
+                job.error = str(exc)
+                store._append_log(job, f"Ошибка: {exc}")
+                logger.exception("Slot embed job %s failed", job.id)
+
+    threading.Thread(target=worker, daemon=True).start()
+    return job
+
+
+def start_slot_index(
+    store: JobStore,
+    pipeline: Pipeline,
+    config: AppConfig,
+    configuration_name: str,
+    *,
+    skip_embeddings: bool = False,
+    force: bool = False,
+    embeddings: EmbeddingsSettingsUpdate | None = None,
+    config_path: Path | None = None,
+) -> Job:
+    name = validate_slot_name(configuration_name)
+    if not slot_has_export(config, name):
+        msg = f"В слоте «{name}» нет выгрузки (Configuration.xml)"
+        raise UploadError(msg)
+    export_root = slot_export_root(config, name)
+    detected = detect_export_configuration(export_root)
+    validate_expected_configuration(detected, name)
+    canonical_source = str(export_root.resolve())
+    job = store.create(
+        JobType.INDEX,
+        source=canonical_source,
+        configuration_name=name,
+        skip_embeddings=skip_embeddings,
+        force=force,
+        expected_configuration=name,
+        embeddings=embeddings,
+    )
+    store._append_log(
+        job,
+        f"Индексация «{name}»: {export_root}"
+        + (f" ({detected.synonym})" if detected.synonym else ""),
+    )
+
+    def worker() -> None:
+        try:
+            if job.embeddings is not None and not job.skip_embeddings:
+                apply_configuration_embeddings(
+                    config,
+                    pipeline,
+                    name,
+                    job.embeddings,
+                    config_path=config_path,
+                )
+                store._append_log(job, f"Настройки эмбеддингов сохранены для «{name}»")
+            run_index_job(store, job, pipeline, export_root)
+        except Exception as exc:
+            if job.status not in (JobStatus.COMPLETED, JobStatus.FAILED):
+                job.status = JobStatus.FAILED
+                job.error = str(exc)
+                store._append_log(job, f"Ошибка: {exc}")
+                logger.exception("Slot index job %s failed", job.id)
+
+    threading.Thread(target=worker, daemon=True).start()
+    return job
+
+
+def import_zip_to_configuration_slot(
+    config: AppConfig,
+    configuration_name: str,
+    zip_path: Path,
+) -> Path:
+    return import_zip_to_slot(config, configuration_name, zip_path)
+
+
+def import_path_to_configuration_slot(
+    config: AppConfig,
+    configuration_name: str,
+    source_path: Path,
+    *,
+    mirror: bool = False,
+) -> Path:
+    return import_path_to_slot(
+        config,
+        configuration_name,
+        source_path,
+        allowed_roots=config.resolved_import_roots(),
+        mirror=mirror,
+    )
+
+
+def register_export_slot(config: AppConfig, configuration_name: str) -> Path:
+    return ensure_export_slot(config, configuration_name)
+
+
 def start_path_index(
     store: JobStore,
     pipeline: Pipeline,
@@ -187,16 +397,25 @@ def start_path_index(
     *,
     skip_embeddings: bool = False,
     force: bool = False,
+    expected_configuration: str | None = None,
 ) -> Job:
     roots = config.resolved_import_roots()
     export_root = validate_source_path(source, roots)
+    detected = detect_export_configuration(export_root)
+    validate_expected_configuration(detected, expected_configuration)
     job = store.create(
         JobType.PATH,
         source=str(source),
+        configuration_name=expected_configuration or detected.name,
         skip_embeddings=skip_embeddings,
         force=force,
+        expected_configuration=expected_configuration,
     )
-    store._append_log(job, f"Путь принят: {export_root}")
+    store._append_log(
+        job,
+        f"Путь принят: {export_root} → {detected.name}"
+        + (f" ({detected.synonym})" if detected.synonym else ""),
+    )
 
     def worker() -> None:
         run_index_job(store, job, pipeline, export_root)
@@ -213,25 +432,47 @@ def start_zip_index(
     *,
     skip_embeddings: bool = False,
     force: bool = False,
+    expected_configuration: str | None = None,
+    embeddings: EmbeddingsSettingsUpdate | None = None,
+    config_path: Path | None = None,
 ) -> Job:
     job = store.create(
         JobType.ZIP,
         source=zip_path.name,
         skip_embeddings=skip_embeddings,
         force=force,
+        expected_configuration=expected_configuration,
+        embeddings=embeddings,
     )
 
     def worker() -> None:
         try:
             job.status = JobStatus.EXTRACTING
             store._append_log(job, "Распаковка ZIP...")
-            exports_dir = config.output / "exports"
-            exports_dir.mkdir(parents=True, exist_ok=True)
-            temp_dest = exports_dir / f"_upload_{job.id}"
-            export_root = safe_extract_zip(zip_path, temp_dest)
-            store._append_log(job, f"Распаковано в {export_root}")
-            run_index_job(store, job, pipeline, export_root)
-        except (UploadError, OSError, zipfile.BadZipFile) as exc:
+            with tempfile.TemporaryDirectory(prefix="conf_doc_zip_") as tmp:
+                export_root = safe_extract_zip(zip_path, Path(tmp))
+                detected = detect_export_configuration(export_root)
+                validate_expected_configuration(detected, job.expected_configuration)
+                name = job.expected_configuration or detected.name
+                job.configuration_name = name
+                store._append_log(
+                    job,
+                    f"Конфигурация в архиве: {detected.name}"
+                    + (f" ({detected.synonym})" if detected.synonym else ""),
+                )
+                slot_root = import_zip_to_slot(config, name, zip_path)
+                store._append_log(job, f"Импортировано в слот: {slot_root}")
+            if job.embeddings is not None and not job.skip_embeddings:
+                apply_configuration_embeddings(
+                    config,
+                    pipeline,
+                    name,
+                    job.embeddings,
+                    config_path=config_path,
+                )
+                store._append_log(job, f"Настройки эмбеддингов сохранены для «{name}»")
+            run_index_job(store, job, pipeline, slot_root)
+        except (UploadError, OSError, zipfile.BadZipFile, ValueError) as exc:
             job.status = JobStatus.FAILED
             job.error = str(exc)
             store._append_log(job, f"Ошибка: {exc}")
@@ -255,14 +496,23 @@ def start_reindex_job(
     *,
     skip_embeddings: bool = False,
     force: bool = False,
+    expected_configuration: str | None = None,
 ) -> Job:
+    detected = detect_export_configuration(export_root)
+    validate_expected_configuration(detected, expected_configuration)
     job = store.create(
         JobType.REINDEX,
         source=str(export_root),
+        configuration_name=expected_configuration or detected.name,
         skip_embeddings=skip_embeddings,
         force=force,
+        expected_configuration=expected_configuration,
     )
-    store._append_log(job, f"Переиндексация: {export_root}")
+    store._append_log(
+        job,
+        f"Переиндексация: {export_root} → {detected.name}"
+        + (f" ({detected.synonym})" if detected.synonym else ""),
+    )
 
     def worker() -> None:
         run_index_job(store, job, pipeline, export_root)
@@ -292,10 +542,13 @@ def run_delete_job(
         )
         job.stats = _delete_result_to_dict(result)
         job.status = JobStatus.COMPLETED
-        store._append_log(
-            job,
-            f"Готово: «{result.name}» удалена ({result.objects_count} объектов)",
-        )
+        if result.objects_count:
+            store._append_log(
+                job,
+                f"Готово: «{result.name}» удалена ({result.objects_count} объектов)",
+            )
+        else:
+            store._append_log(job, f"Готово: слот «{result.name}» удалён")
     except Exception as exc:
         job.status = JobStatus.FAILED
         job.error = str(exc)
@@ -310,7 +563,7 @@ def start_delete_job(
     *,
     remove_files: bool = True,
 ) -> Job:
-    job = store.create(JobType.DELETE, source=name)
+    job = store.create(JobType.DELETE, source=name, configuration_name=name)
     store._append_log(job, f"Запуск удаления: {name}")
 
     def worker() -> None:

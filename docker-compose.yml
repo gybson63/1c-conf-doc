@@ -5,13 +5,13 @@ services:
     build:
       context: .
       args:
-        EXTRAS: embeddings
+        EXTRAS: embeddings,openai
     ports:
       - "${CONF_DOC_PORT:-8050}:8000"
     volumes:
       - ${CONF_DOC_EXPORT:-./data/export}:/data/export:ro
       - ./output:/data/output
-      - ./config.yaml:/config/config.yaml:ro
+      - ./config.yaml:/config/config.yaml
       - model-cache:/root/.cache/huggingface
     environment:
       CONF_DOC_CONFIG_PATH: /config/config.yaml

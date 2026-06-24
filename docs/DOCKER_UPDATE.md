@@ -19,8 +19,8 @@
 
 | Путь / том | Содержимое | Удаляется при `docker compose down`? |
 |------------|------------|--------------------------------------|
-| `./output/` | SQLite, markdown, FAISS | Нет (на диске хоста) |
-| `./data/export/` | XML-выгрузка | Нет |
+| `./output/` | SQLite, markdown, FAISS, слоты `exports/{Имя}/` | Нет (на диске хоста) |
+| `./data/export/` | XML-выгрузка (read-only staging) | Нет |
 | `./config.yaml` | Настройки сервера | Нет |
 | том `model-cache` | Кэш Hugging Face (sentence-transformers) | Нет (именованный том) |
 | Образ `conf-doc` | Собранный код и pip-пакеты | Нет (пока не `docker image rm`) |
@@ -73,9 +73,31 @@ curl http://localhost:8050/health
 
 Ожидается HTTP 200. Порт на хосте — `8050` по умолчанию (`CONF_DOC_PORT` в `.env` или окружении).
 
-### 4. Переиндексировать выгрузку
+### 4. Обновить индекс на сервере
+
+**Рекомендуется (веб-UI):** [docs/CONFIGURATION_SLOTS.md](CONFIGURATION_SLOTS.md)
+
+| Задача | Действие в UI |
+|--------|----------------|
+| Новая выгрузка в слот | «Конфигурации» → **«+ Новая»** (ZIP или путь staging) |
+| Обновилась XML-выгрузка | **«Обновить»** (парсинг и чанки, без API эмбеддингов) |
+| Сменились эмбеддинги / нет FAISS | **«Переиндексировать»** |
+| Полный цикл с нуля | «+ Новая» → импорт → «Запустить индексацию» в мастере |
+
+**После обновления с legacy `export_path`** (`_upload_*`, общий `/data/export` в БД):
+
+```powershell
+docker compose run --rm conf-doc configurations migrate-exports
+```
 
 **После изменений парсера, chunker, markdown** (новые типы чанков, Report+СКД и т.п.):
+
+```powershell
+docker compose run --rm conf-doc index --configuration ИмяКонфигурации --skip-embeddings
+docker compose run --rm conf-doc embed --configuration ИмяКонфигурации
+```
+
+Для одной конфигурации без слота (legacy `source` в config):
 
 ```powershell
 docker compose run --rm conf-doc index
@@ -104,14 +126,14 @@ docker compose run --rm conf-doc embed
 Через HTTP API (контейнер уже запущен):
 
 ```powershell
-curl -X POST http://localhost:8050/reindex -H "Content-Type: application/json" -d "{}"
+# Только метаданные и чанки
+curl -X POST "http://localhost:8050/configurations/ИмяКонфигурации/index" -H "Content-Type: application/json" -d "{\"skip_embeddings\": true}"
+
+# Только эмбеддинги
+curl -X POST "http://localhost:8050/configurations/ИмяКонфигурации/embed" -H "Content-Type: application/json" -d "{\"force\": false}"
 ```
 
-С принудительной пересборкой:
-
-```powershell
-curl -X POST http://localhost:8050/reindex -H "Content-Type: application/json" -d "{\"force\": true}"
-```
+Legacy (`POST /reindex`) по-прежнему работает, но устарел — предпочтительнее per-configuration API.
 
 ### 5. Обновить MCP-клиент на хосте (если менялся код `mcp/` или API-клиент)
 
@@ -168,8 +190,9 @@ conf-doc mcp
 
 ### Только новая выгрузка 1С
 
-1. Скопируйте XML в `data/export/`
-2. `docker compose run --rm conf-doc index` — образ пересобирать не нужно
+1. Скопируйте XML в staging (`data/export/` или отдельный том — см. [CONFIGURATION_SLOTS.md](CONFIGURATION_SLOTS.md))
+2. Веб-UI: **«+ Новая»** → привязать путь → **«Обновить»** → **«Переиндексировать»**  
+   Или CLI: `index --configuration Имя` — образ пересобирать не нужно
 
 ### Смена модели эмбеддингов в `config.yaml`
 
@@ -213,4 +236,4 @@ docker compose logs -f conf-doc
 
 Пример конфигурации: [`config.docker.example.yaml`](../config.docker.example.yaml).
 
-Первичная установка: раздел **Docker** в [`README.md`](../README.md).
+Первичная установка и слоты: [CONFIGURATION_SLOTS.md](CONFIGURATION_SLOTS.md), раздел **Docker** в [README.md](../README.md).

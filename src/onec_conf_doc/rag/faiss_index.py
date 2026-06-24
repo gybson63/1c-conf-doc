@@ -101,6 +101,16 @@ class FaissIndex:
         with self.map_path.open("w", encoding="utf-8") as fh:
             json.dump(payload, fh, ensure_ascii=False, indent=2)
 
+    @staticmethod
+    def read_stored_model(vectors_dir: Path) -> str | None:
+        map_path = vectors_dir / "chunk_map.json"
+        if not map_path.exists():
+            return None
+        with map_path.open(encoding="utf-8") as fh:
+            data = json.load(fh)
+        model = data.get("model")
+        return str(model) if model else None
+
     @property
     def stored_model(self) -> str | None:
         return self._stored_model

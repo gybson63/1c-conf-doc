@@ -9,7 +9,9 @@ from typing import Annotated, Any, cast
 import typer
 import uvicorn
 
-from onec_conf_doc.config import AppConfig, load_config
+from onec_conf_doc.config import AppConfig, Settings, load_config
+from onec_conf_doc.export_migrate import migrate_configuration_exports
+from onec_conf_doc.export_slot import slot_export_root, slot_has_export
 from onec_conf_doc.rag.pipeline import IndexStats, Pipeline
 
 if hasattr(sys.stdout, "reconfigure"):
@@ -79,6 +81,26 @@ def configurations_delete_cmd(
             typer.echo("  markdown: удалён")
         if result.vectors_removed:
             typer.echo("  FAISS: удалён")
+        if result.export_removed:
+            typer.echo("  выгрузка: удалена")
+
+
+@configurations_app.command("migrate-exports")
+def configurations_migrate_exports_cmd(
+    config: Annotated[Path | None, typer.Option(help="Путь к config.yaml")] = None,
+) -> None:
+    """Скопировать legacy export_path в output/exports/{Имя}/."""
+    cfg = load_config(config)
+    pipeline = Pipeline(cfg)
+    results = migrate_configuration_exports(cfg, pipeline)
+    if not results:
+        typer.echo("Нет конфигураций для миграции.")
+        return
+    for row in results:
+        if row.migrated:
+            typer.echo(f"  {row.name}: {row.old_path} → {row.new_path}")
+        else:
+            typer.echo(f"  {row.name}: {row.message} ({row.old_path or '—'})")
 
 
 @app.command("index")
@@ -104,7 +126,26 @@ def index_cmd(
     _apply_configuration(cfg, configuration)
 
     pipeline = Pipeline(cfg)
+    index_source = source
+    if configuration:
+        if not slot_has_export(cfg, configuration):
+            typer.echo(
+                f"В слоте exports/{configuration}/ нет выгрузки. "
+                "Импортируйте через веб-UI или скопируйте XML вручную.",
+                err=True,
+            )
+            raise typer.Exit(code=1)
+        index_source = slot_export_root(cfg, configuration)
+    elif len(pipeline.indexer.list_configurations()) > 1:
+        typer.echo(
+            "В базе несколько конфигураций — укажите --configuration Имя",
+            err=True,
+        )
+        raise typer.Exit(code=1)
+
     stats = pipeline.index_export(
+        source=index_source,
+        expected_configuration=configuration,
         skip_embeddings=skip_embeddings,
         force=force,
         show_progress=False if quiet else None,
@@ -264,12 +305,13 @@ def serve_cmd(
 ) -> None:
     """Запустить HTTP API."""
     cfg = load_config(config)
+    config_path = config or Settings().config_path
     bind_host = host or cfg.api.host
     bind_port = port or cfg.api.port
 
     from onec_conf_doc.api.app import create_app
 
-    api_app = create_app(cfg)
+    api_app = create_app(cfg, config_path=config_path)
     uvicorn.run(api_app, host=bind_host, port=bind_port)
 
 

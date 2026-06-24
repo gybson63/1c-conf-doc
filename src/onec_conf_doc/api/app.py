@@ -24,7 +24,7 @@ def _static_dir() -> Path:
     return Path(str(importlib.resources.files("onec_conf_doc.web") / "static"))
 
 
-def create_app(config: AppConfig) -> FastAPI:
+def create_app(config: AppConfig, config_path: Path | None = None) -> FastAPI:
     setup_logging()
     pipeline = Pipeline(config)
     app = FastAPI(
@@ -33,6 +33,7 @@ def create_app(config: AppConfig) -> FastAPI:
         version=__version__,
     )
     app.state.config = config
+    app.state.config_path = config_path
     app.state.pipeline = pipeline
     app.state.jobs = JobStore()
 

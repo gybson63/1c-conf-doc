@@ -1,21 +1,34 @@
 # Пример конфигурации для Docker (скопируйте в config.yaml).
 # Пути внутри контейнера — см. volumes в docker-compose.yml.
 
-source: /data/export
+source: /data/export   # fallback для CLI; веб-UI пишет выгрузки в /data/output/exports/{Имя}/
 output: /data/output
 
 configuration: null
 
+# import_roots — разрешённые пути для привязки к слоту (staging). По умолчанию без копирования — см. docs/CONFIGURATION_SLOTS.md
+import_roots:
+  - /data/export
+  # - /data/export-zup   # отдельный том для второй конфигурации
+
 # Эмбеддинги для /search (не путать с llm — chat-модель для /query ниже).
-# Дефолт: локально, без API-ключа. См. README — «Выбор провайдера эмбеддингов».
+# Дефолт: локально, без API-ключа. OpenAI включается в config.yaml или в мастере индексации.
+# Пакет openai уже в Docker-образе (EXTRAS=embeddings,openai).
 embeddings:
   provider: sentence_transformers
   model: paraphrase-multilingual-MiniLM-L12-v2
-  # API-эмбеддинги (нужен образ: build --build-arg EXTRAS="embeddings,openai"):
+  # API-эмбеддинги (ключ и base_url — при индексации или здесь):
   # provider: openai
   # base_url: https://polza.ai/api/v1
   # model: text-embedding-3-small
   # openai_api_key: your-key-here
+# Переопределение эмбеддингов для отдельных конфигураций (multi-config).
+# Ключ — имя из Configuration.xml; значение — те же поля, что у embeddings выше.
+# configuration_embeddings:
+#   БухгалтерияПредприятия:
+#     provider: openai
+#     model: text-embedding-3-small
+#     openai_api_key: your-key-here
 
 faiss:
   index_type: flat

@@ -14,22 +14,38 @@ class EmbeddingCache:
         self._indexer = indexer
 
     def get(self, config_id: int, content_hash: str, model: str) -> np.ndarray | None:
+        found = self.get_many(config_id, [content_hash], model)
+        return found.get(content_hash)
+
+    def get_many(
+        self,
+        config_id: int,
+        content_hashes: list[str],
+        model: str,
+        *,
+        batch_size: int = 500,
+    ) -> dict[str, np.ndarray]:
+        if not content_hashes:
+            return {}
+        result: dict[str, np.ndarray] = {}
         with self._indexer.connect() as conn:
-            row = conn.execute(
-                """
-                SELECT dimension, vector
-                FROM embedding_cache
-                WHERE config_id = ? AND content_hash = ? AND model = ?
-                """,
-                (config_id, content_hash, model),
-            ).fetchone()
-        if row is None:
-            return None
-        dimension = int(row["dimension"])
-        vector = np.frombuffer(row["vector"], dtype=np.float32)
-        if vector.shape[0] != dimension:
-            return None
-        return vector.copy()
+            for start in range(0, len(content_hashes), batch_size):
+                batch = content_hashes[start : start + batch_size]
+                placeholders = ", ".join("?" for _ in batch)
+                rows = conn.execute(
+                    f"""
+                    SELECT content_hash, dimension, vector
+                    FROM embedding_cache
+                    WHERE config_id = ? AND model = ? AND content_hash IN ({placeholders})
+                    """,
+                    (config_id, model, *batch),
+                ).fetchall()
+                for row in rows:
+                    dimension = int(row["dimension"])
+                    vector = np.frombuffer(row["vector"], dtype=np.float32)
+                    if vector.shape[0] == dimension:
+                        result[str(row["content_hash"])] = vector.copy()
+        return result
 
     def put_batch(
         self,

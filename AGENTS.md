@@ -24,6 +24,10 @@
 
 RAG (`conf_doc_query`) опционален — см. [README — Поиск и RAG](README.md#поиск-и-rag-embeddings-vs-llm).
 
+## Слоты выгрузки и индексация
+
+Каждая конфигурация — слот `output/exports/{Имя}/` на сервере. Веб-UI: **«+ Новая»** (импорт), **«Обновить»** (XML + чанки), **«Переиндексировать»** (эмбеддинги). Подробно: [docs/CONFIGURATION_SLOTS.md](docs/CONFIGURATION_SLOTS.md).
+
 ## Docker: обновление backend
 
 После значимых изменений (`src/`, `Dockerfile`, chunker, парсер): [docs/DOCKER_UPDATE.md](docs/DOCKER_UPDATE.md) — пересборка образа, `index`, при необходимости обновление MCP на хосте.

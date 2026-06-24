@@ -42,7 +42,12 @@ def _pipeline(tmp_path: Path, export: Path | None = None) -> tuple[Pipeline, Moc
     cfg = AppConfig(source=source, output=tmp_path / "output")
     pipeline = Pipeline(cfg)
     mock = MockEmbeddingProvider()
-    pipeline._embedding_provider = mock
+
+    def _provider_for(name: str) -> MockEmbeddingProvider:
+        pipeline._embedding_providers[name] = mock
+        return mock
+
+    pipeline.embedding_provider_for = _provider_for  # type: ignore[method-assign]
     return pipeline, mock
 
 

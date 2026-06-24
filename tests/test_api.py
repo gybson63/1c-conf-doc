@@ -154,3 +154,20 @@ def test_delete_configuration_async(tmp_path) -> None:
     assert job["configuration_name"] == config_name
     assert client.get("/configurations").json() == []
     assert any("SQLite" in line for line in job["logs"])
+
+
+def test_configurations_jobs_route_not_configuration_slot(tmp_path) -> None:
+    cfg = AppConfig(source=FIXTURES, output=tmp_path / "output")
+    client = TestClient(create_app(cfg))
+
+    jobs = client.get("/configurations/jobs?limit=10")
+    assert jobs.status_code == 200
+    assert jobs.json() == []
+
+    ghost = client.get("/configurations/jobs")
+    assert ghost.status_code == 200
+    assert isinstance(ghost.json(), list)
+
+    configs = client.get("/configurations").json()
+    assert not any(c["name"] == "jobs" for c in configs)
+    assert not (tmp_path / "output" / "exports" / "jobs").exists()
