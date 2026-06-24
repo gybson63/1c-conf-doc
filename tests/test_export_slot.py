@@ -100,6 +100,91 @@ def test_import_mismatch_returns_400(tmp_path: Path) -> None:
     assert resp.status_code == 400
 
 
+def test_async_import_path_job(tmp_path: Path) -> None:
+    cfg = AppConfig(source=FIXTURES, output=tmp_path / "output", import_roots=[FIXTURES.parent])
+    app = create_app(cfg)
+    client = TestClient(app)
+
+    client.post("/configurations", json={"name": CONFIG_NAME})
+    resp = client.post(
+        f"/configurations/{CONFIG_NAME}/import-path?async_job=true",
+        json={"source": str(FIXTURES)},
+    )
+    assert resp.status_code == 200
+    body = resp.json()
+    assert "job_id" in body
+    job = _wait_job(client, body["job_id"])
+    assert job["status"] == "completed"
+    assert job["type"] == "import_path"
+    assert job["configuration_name"] == CONFIG_NAME
+
+    partial = client.get(f"/configurations/jobs/{body['job_id']}", params={"since_log": 1})
+    assert partial.status_code == 200
+    partial_body = partial.json()
+    assert partial_body["logs_offset"] == 1
+    assert partial_body["logs_total"] >= 1
+    assert len(partial_body["logs"]) == partial_body["logs_total"] - 1
+
+
+def test_db_only_config_connect_source_and_index(tmp_path: Path) -> None:
+    """Конфигурация в БД без источника: подключение пути и индексация."""
+    cfg = AppConfig(source=FIXTURES, output=tmp_path / "output", import_roots=[FIXTURES.parent])
+    app = create_app(cfg)
+    client = TestClient(app)
+
+    client.post("/configurations", json={"name": CONFIG_NAME})
+    imp = client.post(
+        f"/configurations/{CONFIG_NAME}/import-path",
+        json={"source": str(FIXTURES)},
+    )
+    assert imp.status_code == 200
+
+    idx = client.post(
+        f"/configurations/{CONFIG_NAME}/index",
+        json={"skip_embeddings": True},
+    )
+    assert idx.status_code == 202
+    _wait_job(client, idx.json()["job_id"])
+
+    slot = cfg.export_dir_for(CONFIG_NAME)
+    for child in slot.iterdir():
+        if child.is_dir():
+            shutil.rmtree(child)
+        else:
+            child.unlink()
+
+    card = client.get(f"/configurations/{CONFIG_NAME}").json()
+    assert card["in_database"] is True
+    assert card["has_export"] is False
+    assert card["objects_count"] > 0
+
+    reconnect = client.post(
+        f"/configurations/{CONFIG_NAME}/import-path?async_job=true",
+        json={"source": str(FIXTURES)},
+    )
+    assert reconnect.status_code == 200
+    job = _wait_job(client, reconnect.json()["job_id"])
+    assert job["status"] == "completed"
+    assert job["type"] == "import_path"
+
+    card_after = client.get(f"/configurations/{CONFIG_NAME}").json()
+    assert card_after["has_export"] is True
+    assert card_after["export_linked"] is True
+
+    update = client.post(
+        f"/configurations/{CONFIG_NAME}/index",
+        json={"skip_embeddings": True},
+    )
+    assert update.status_code == 202
+    index_job = _wait_job(client, update.json()["job_id"])
+    assert index_job["status"] == "completed"
+
+    final = client.get(f"/configurations/{CONFIG_NAME}").json()
+    assert final["in_database"] is True
+    assert final["has_export"] is True
+    assert final["objects_count"] > 0
+
+
 def test_slot_index_flow(tmp_path: Path) -> None:
     cfg = AppConfig(source=FIXTURES, output=tmp_path / "output", import_roots=[FIXTURES.parent])
     app = create_app(cfg)
