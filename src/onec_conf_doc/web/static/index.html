@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>1c-conf-doc</title>
-  <link rel="stylesheet" href="/static/styles.css?v=20260619c">
+  <link rel="stylesheet" href="/static/styles.css?v=20260624d">
 </head>
 <body>
   <header class="header">
@@ -16,14 +16,14 @@
     <button class="tab active" data-tab="dashboard">Статус</button>
     <button class="tab" data-tab="configurations">Конфигурации</button>
     <button class="tab" data-tab="search">Поиск</button>
-    <button class="tab" data-tab="logs">Логи</button>
+    <button class="tab" data-tab="logs">Задачи</button>
   </nav>
 
   <main>
     <section id="panel-dashboard" class="panel active">
       <div class="card">
         <div class="card-header">
-          <h2>Health check</h2>
+          <h2>Состояние сервера</h2>
           <button id="btn-refresh-health" class="btn secondary">Обновить</button>
         </div>
         <div id="health-content" class="health-grid">
@@ -41,6 +41,16 @@
             <button id="btn-refresh-configs" class="btn secondary">Обновить</button>
           </div>
         </div>
+        <p class="configs-help hint">
+          Нажмите <strong>Управление</strong>, чтобы открыть страницу конфигурации: подключить источник файлов,
+          обновить метаданные, переиндексировать и настроить параметры.
+        </p>
+        <div class="configs-toolbar">
+          <label class="configs-filter-label">
+            <span class="sr-only">Фильтр</span>
+            <input type="search" id="configs-filter" placeholder="Фильтр по имени или статусу…" autocomplete="off">
+          </label>
+        </div>
         <div class="table-wrap">
           <table id="configs-table">
             <thead>
@@ -49,10 +59,10 @@
                 <th>Синоним</th>
                 <th>Версия</th>
                 <th>Объектов</th>
-                <th>Выгрузка</th>
-                <th>Индексация</th>
-                <th>Эмбеддинги</th>
-                <th></th>
+                <th title="Подключён ли источник XML">Источник</th>
+                <th title="Дата последнего парсинга XML">Метаданные</th>
+                <th title="FAISS-индекс эмбеддингов">Эмбеддинги</th>
+                <th>Действия</th>
               </tr>
             </thead>
             <tbody id="configs-body">
@@ -60,100 +70,149 @@
             </tbody>
           </table>
         </div>
-        <div id="configs-action-status" class="job-status hidden"></div>
+        <div id="configs-action-status" class="job-status hidden">
+          <div id="configs-progress-bar" class="progress-bar hidden">
+            <div id="configs-progress-fill" class="progress-fill"></div>
+          </div>
+          <span id="configs-action-text"></span>
+        </div>
       </div>
+    </section>
 
-      <div id="wizard-overlay" class="wizard-overlay hidden" aria-hidden="true">
-        <div class="card wizard-card" role="dialog" aria-labelledby="wizard-title">
-          <div class="card-header">
-            <h2 id="wizard-title">Индексация конфигурации</h2>
-            <button type="button" class="btn secondary" id="btn-wizard-close">Закрыть</button>
+    <section id="panel-configuration" class="panel">
+      <div class="card configuration-card">
+        <div class="card-header">
+          <button type="button" id="btn-configuration-back" class="btn secondary">← К списку</button>
+          <h2 id="configuration-title">Конфигурация</h2>
+        </div>
+
+        <div id="configuration-status" class="configuration-status muted">Загрузка…</div>
+        <div id="configuration-no-source-banner" class="config-alert hidden">
+          Источник XML не подключён. Укажите файлы в блоке «Обновить из файлов», чтобы обновлять метаданные из выгрузки.
+        </div>
+
+        <div class="wizard-section" id="configuration-name-section">
+          <h3>Конфигурация</h3>
+          <label>
+            Имя (из Configuration.xml)
+            <input type="text" id="wizard-config-name" placeholder="определится из папки или ZIP">
+          </label>
+          <p id="wizard-slot-hint" class="hint">При указании пути к выгрузке имя заполнится автоматически.</p>
+        </div>
+
+        <div class="wizard-section">
+          <h3>Обновить из файлов</h3>
+          <p class="hint">Укажите, откуда взять XML-выгрузку. Хранилище: <code id="wizard-slot-path">output/exports/…</code></p>
+          <div class="subtabs wizard-import-tabs">
+            <button type="button" class="subtab active" data-wizard-import="zip">ZIP-архив</button>
+            <button type="button" class="subtab" data-wizard-import="path">Путь на сервере</button>
           </div>
-
-          <div class="wizard-section">
-            <h3>1. Конфигурация</h3>
+          <div id="wizard-import-zip" class="wizard-import-panel">
+            <div id="wizard-drop-zone" class="drop-zone">
+              <p>Перетащите .zip или выберите файл</p>
+              <input type="file" id="wizard-input-zip" accept=".zip" hidden>
+              <button type="button" id="btn-wizard-pick-zip" class="btn secondary">Выбрать файл</button>
+              <p id="wizard-zip-filename" class="zip-name"></p>
+            </div>
+            <button type="button" class="btn secondary" id="btn-wizard-import-zip">Подключить ZIP</button>
+          </div>
+          <div id="wizard-import-path" class="wizard-import-panel hidden">
             <label>
-              Имя (из Configuration.xml)
-              <input type="text" id="wizard-config-name" placeholder="определится из папки или ZIP">
+              Путь к выгрузке (например /data/export)
+              <input type="text" id="wizard-source-path" placeholder="/data/export">
             </label>
-            <p id="wizard-slot-hint" class="hint">При указании пути к выгрузке имя заполнится автоматически.</p>
+            <p class="hint">По умолчанию путь привязывается без копирования — быстро для больших выгрузок.</p>
+            <label class="checkbox-label">
+              <input type="checkbox" id="wizard-mirror-path">
+              Скопировать файлы в хранилище (медленно)
+            </label>
+            <p id="wizard-mirror-warning" class="mirror-warning hidden">
+              Копирование гигабайтных выгрузок может занять часы. Для staging предпочтительна привязка без копирования.
+            </p>
+            <button type="button" class="btn secondary" id="btn-wizard-import-path">Подключить путь</button>
           </div>
+          <div id="wizard-import-status" class="job-status hidden"></div>
+        </div>
 
-          <div class="wizard-section">
-            <h3>2. Выгрузка в слот</h3>
-            <p class="hint">Папка на сервере: <code id="wizard-slot-path">output/exports/…</code></p>
-            <div class="subtabs wizard-import-tabs">
-              <button type="button" class="subtab active" data-wizard-import="zip">ZIP-архив</button>
-              <button type="button" class="subtab" data-wizard-import="path">Путь (staging)</button>
-            </div>
-            <div id="wizard-import-zip" class="wizard-import-panel">
-              <div id="wizard-drop-zone" class="drop-zone">
-                <p>Перетащите .zip или выберите файл</p>
-                <input type="file" id="wizard-input-zip" accept=".zip" hidden>
-                <button type="button" id="btn-wizard-pick-zip" class="btn secondary">Выбрать файл</button>
-                <p id="wizard-zip-filename" class="zip-name"></p>
-              </div>
-              <button type="button" class="btn secondary" id="btn-wizard-import-zip">Импортировать ZIP в слот</button>
-            </div>
-            <div id="wizard-import-path" class="wizard-import-panel hidden">
-              <label>
-                Путь к выгрузке (например /data/export)
-                <input type="text" id="wizard-source-path" placeholder="/data/export">
-              </label>
-              <p class="hint">По умолчанию путь привязывается к слоту без копирования — быстро и без ошибок на больших выгрузках.</p>
-              <label class="checkbox-label">
-                <input type="checkbox" id="wizard-mirror-path">
-                Скопировать файлы в слот (медленно, для переноса с staging)
-              </label>
-              <button type="button" class="btn secondary" id="btn-wizard-import-path">Привязать путь к слоту</button>
-            </div>
-            <div id="wizard-import-status" class="job-status hidden"></div>
-          </div>
+        <div class="wizard-section">
+          <h3>Проверка источника</h3>
+          <button type="button" class="btn secondary" id="btn-wizard-detect">Проверить источник</button>
+          <div id="wizard-detect-status" class="job-status hidden"></div>
+        </div>
 
-          <div class="wizard-section">
-            <h3>3. Проверка</h3>
-            <button type="button" class="btn secondary" id="btn-wizard-detect">Проверить слот</button>
-            <div id="wizard-detect-status" class="job-status hidden"></div>
+        <div class="wizard-section" id="wizard-embeddings-section">
+          <h3>Эмбеддинги</h3>
+          <p id="wizard-embeddings-label" class="hint settings-intro"></p>
+          <div class="form">
+            <label>
+              Провайдер
+              <select id="wizard-embeddings-provider">
+                <option value="sentence_transformers" selected>Локально (sentence-transformers)</option>
+                <option value="ollama">Ollama</option>
+                <option value="openai">OpenAI-совместимый API</option>
+              </select>
+            </label>
+            <label>
+              Модель
+              <input type="text" id="wizard-embeddings-model" placeholder="paraphrase-multilingual-MiniLM-L12-v2" value="paraphrase-multilingual-MiniLM-L12-v2">
+            </label>
+            <p id="wizard-embeddings-model-hint" class="hint"></p>
+            <div id="wizard-embeddings-openai-fields" class="embeddings-provider-fields hidden">
+              <label>Base URL API <input type="text" id="wizard-embeddings-base-url" placeholder="https://api.openai.com/v1"></label>
+              <label>API-ключ <input type="password" id="wizard-embeddings-api-key" autocomplete="off"></label>
+            </div>
+            <div id="wizard-embeddings-ollama-fields" class="embeddings-provider-fields hidden">
+              <label>URL Ollama <input type="text" id="wizard-embeddings-ollama-url" placeholder="http://localhost:11434"></label>
+            </div>
+            <div class="settings-actions btn-group">
+              <button type="button" class="btn secondary" id="btn-wizard-test-embeddings">Проверить соединение</button>
+            </div>
+            <div id="wizard-embeddings-status" class="job-status hidden"></div>
           </div>
+        </div>
 
-          <div class="wizard-section" id="wizard-embeddings-section">
-            <h3>4. Эмбеддинги</h3>
-            <p id="wizard-embeddings-label" class="hint settings-intro"></p>
-            <div class="form">
-              <label>
-                Провайдер
-                <select id="wizard-embeddings-provider">
-                  <option value="sentence_transformers" selected>Локально (sentence-transformers)</option>
-                  <option value="ollama">Ollama</option>
-                  <option value="openai">OpenAI-совместимый API</option>
-                </select>
+        <div class="wizard-section">
+          <h3>Действия</h3>
+          <p class="hint">
+            <strong>Обновить метаданные</strong> — парсинг XML и чанки без эмбеддингов.
+            <strong>Переиндексировать</strong> — только эмбеддинги по чанкам в базе.
+            <strong>Полная индексация</strong> — метаданные и эмбеддинги с текущими параметрами.
+          </p>
+          <div class="btn-group configuration-actions">
+            <button type="button" class="btn secondary" id="btn-config-page-update">Обновить метаданные</button>
+            <button type="button" class="btn secondary" id="btn-config-page-reindex">Переиндексировать</button>
+            <button type="button" class="btn primary" id="btn-wizard-index">Полная индексация</button>
+            <button type="button" class="btn danger" id="btn-config-page-delete">Удалить</button>
+          </div>
+          <div class="configuration-index-options">
+            <div class="configuration-index-option">
+              <label class="checkbox">
+                <input type="checkbox" id="wizard-skip-embeddings">
+                Пропустить семантический поиск
               </label>
-              <label>
-                Модель
-                <input type="text" id="wizard-embeddings-model" placeholder="paraphrase-multilingual-MiniLM-L12-v2" value="paraphrase-multilingual-MiniLM-L12-v2">
+              <p id="wizard-skip-embeddings-hint" class="option-hint">
+                Обновится текстовая информация и семантический поиск по изменённым файлам.
+              </p>
+            </div>
+            <div class="configuration-index-option">
+              <label class="checkbox">
+                <input type="checkbox" id="wizard-force">
+                Полное обновление семантического поиска (force)
               </label>
-              <p id="wizard-embeddings-model-hint" class="hint"></p>
-              <div id="wizard-embeddings-openai-fields" class="embeddings-provider-fields hidden">
-                <label>Base URL API <input type="text" id="wizard-embeddings-base-url" placeholder="https://api.openai.com/v1"></label>
-                <label>API-ключ <input type="password" id="wizard-embeddings-api-key" autocomplete="off"></label>
-              </div>
-              <div id="wizard-embeddings-ollama-fields" class="embeddings-provider-fields hidden">
-                <label>URL Ollama <input type="text" id="wizard-embeddings-ollama-url" placeholder="http://localhost:11434"></label>
-              </div>
-              <div class="settings-actions btn-group">
-                <button type="button" class="btn secondary" id="btn-wizard-test-embeddings">Проверить соединение</button>
-              </div>
-              <div id="wizard-embeddings-status" class="job-status hidden"></div>
+              <p class="option-hint">
+                Полное обновление семантического поиска для всех файлов, а не только изменённых.
+                Операция дольше обычной.
+              </p>
             </div>
           </div>
+          <div id="wizard-index-status" class="job-status hidden"></div>
+        </div>
 
-          <div class="wizard-section">
-            <h3>5. Индексация</h3>
-            <label class="checkbox"><input type="checkbox" id="wizard-skip-embeddings"> Пропустить эмбеддинги</label>
-            <label class="checkbox"><input type="checkbox" id="wizard-force"> Полная пересборка (force)</label>
-            <button type="button" class="btn primary" id="btn-wizard-index">Запустить индексацию</button>
-            <div id="wizard-index-status" class="job-status hidden"></div>
+        <div id="configuration-action-status" class="job-status hidden">
+          <div id="configuration-progress-bar" class="progress-bar hidden">
+            <div id="configuration-progress-fill" class="progress-fill"></div>
           </div>
+          <span id="configuration-action-text"></span>
         </div>
       </div>
     </section>
@@ -199,7 +258,7 @@
       <div class="logs-layout">
         <div class="card logs-jobs">
           <div class="card-header">
-            <h2>Задачи индексации</h2>
+            <h2>Фоновые задачи</h2>
             <button id="btn-refresh-jobs" class="btn secondary">Обновить</button>
           </div>
           <ul id="jobs-list" class="jobs-list"></ul>
@@ -214,11 +273,12 @@
             </div>
           </div>
           <pre id="logs-output" class="log-output"></pre>
+          <p id="logs-truncated-hint" class="hint hidden">Показаны последние строки лога. Полная история хранится на сервере.</p>
         </div>
       </div>
     </section>
   </main>
 
-  <script src="/static/app.js?v=20260623h"></script>
+  <script src="/static/app.js?v=20260624d"></script>
 </body>
 </html>

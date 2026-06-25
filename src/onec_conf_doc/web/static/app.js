@@ -14,8 +14,40 @@ const pendingConfigOps = {
 
 let wizardZipFile = null;
 let wizardPathDetectTimer = null;
+let configFilterText = "";
+let currentConfigurationCard = null;
+const jobLogOffsets = new Map();
+const MAX_LOG_DOM_LINES = 500;
 
 const API = "";
+
+const JOB_STATUS_LABELS = {
+  pending: "ожидание",
+  extracting: "импорт",
+  indexing: "индексация",
+  deleting: "удаление",
+  completed: "готово",
+  failed: "ошибка",
+};
+
+const JOB_TYPE_LABELS = {
+  path: "путь",
+  zip: "ZIP + индекс",
+  reindex: "переиндексация",
+  index: "метаданные",
+  embed: "эмбеддинги",
+  delete: "удаление",
+  import_zip: "обновление из файлов",
+  import_path: "обновление из файлов",
+};
+
+const JOB_KIND_LABELS = {
+  update: "обновление метаданных",
+  embed: "переиндексация",
+  delete: "удаление",
+  full: "полная индексация",
+  import: "обновление из файлов",
+};
 
 async function api(path, options = {}) {
   const res = await fetch(API + path, options);
@@ -40,6 +72,56 @@ function on(selector, event, handler) {
   if (el) el.addEventListener(event, handler);
 }
 
+function setButtonLoading(btn, loading, { label } = {}) {
+  if (!btn) return;
+  btn.classList.toggle("is-loading", Boolean(loading));
+  btn.setAttribute("aria-busy", loading ? "true" : "false");
+  if (label != null) btn.textContent = label;
+  if (loading) btn.disabled = true;
+}
+
+function clearButtonLoading(btn, label) {
+  if (!btn) return;
+  btn.classList.remove("is-loading");
+  btn.setAttribute("aria-busy", "false");
+  btn.disabled = false;
+  if (label != null) btn.textContent = label;
+}
+
+async function withButtonLoading(btn, fn, options = {}) {
+  const { loadingLabel = "Запуск…", sustainOnSuccess = false } = options;
+  if (!btn) return fn();
+  const prevLabel = btn.textContent;
+  setButtonLoading(btn, true, { label: loadingLabel });
+  try {
+    const result = await fn();
+    if (!sustainOnSuccess) {
+      clearButtonLoading(btn, prevLabel);
+    } else {
+      const card = currentConfigurationCard || {
+        name: $("#wizard-config-name")?.value.trim() || "",
+        in_database: false,
+        has_export: false,
+        objects_count: 0,
+      };
+      if (card.name) updateConfigurationPageActions(card);
+    }
+    return result;
+  } catch (err) {
+    clearButtonLoading(btn, prevLabel);
+    throw err;
+  }
+}
+
+function syncConfigButton(btn, { disabled, loading, label, title } = {}) {
+  if (!btn) return;
+  if (label != null) btn.textContent = label;
+  if (title != null) btn.title = title;
+  btn.disabled = Boolean(disabled);
+  btn.classList.toggle("is-loading", Boolean(loading));
+  btn.setAttribute("aria-busy", loading ? "true" : "false");
+}
+
 function showPanel(name) {
   document.querySelectorAll(".panel").forEach((p) => p.classList.remove("active"));
   document.querySelectorAll(".tab").forEach((t) => t.classList.remove("active"));
@@ -55,6 +137,8 @@ function showPanel(name) {
       loadConfigurations();
     } else if (name === "dashboard") {
       loadHealth();
+    } else if (name === "configuration") {
+      /* loaded by loadConfigurationPage */
     }
   }
 }
@@ -67,6 +151,33 @@ function objectJsonUrl(objectType, name, configuration) {
 function objectPageUrl(objectType, name, configuration) {
   const q = configuration ? `?configuration=${encodeURIComponent(configuration)}` : "";
   return `/object/${encodeURIComponent(objectType)}/${encodeURIComponent(name)}${q}`;
+}
+
+function configurationPageUrl(name) {
+  if (!name || name === "new") return "/configuration/new";
+  return `/configuration/${encodeURIComponent(name)}`;
+}
+
+function parseConfigurationRoute() {
+  const match = window.location.pathname.match(/^\/configuration\/(.+)$/);
+  if (!match) return null;
+  const raw = decodeURIComponent(match[1]);
+  if (raw === "new") return { name: null, isNew: true };
+  return { name: raw, isNew: false };
+}
+
+function navigateToConfiguration(name) {
+  const url = configurationPageUrl(name);
+  history.pushState({}, "", url);
+  loadConfigurationPage(name);
+}
+
+function goToConfigurations() {
+  if (window.location.pathname.startsWith("/configuration/")) {
+    history.pushState({}, "", "/");
+  }
+  currentConfigurationCard = null;
+  showPanel("configurations");
 }
 
 function parseObjectRoute() {
@@ -149,9 +260,14 @@ function goToSearch() {
 }
 
 function initRouting() {
-  const route = parseObjectRoute();
-  if (route) {
-    loadObjectPage(route.objectType, route.name, route.configuration);
+  const objectRoute = parseObjectRoute();
+  if (objectRoute) {
+    loadObjectPage(objectRoute.objectType, objectRoute.name, objectRoute.configuration);
+    return;
+  }
+  const configRoute = parseConfigurationRoute();
+  if (configRoute) {
+    loadConfigurationPage(configRoute.isNew ? null : configRoute.name);
     return;
   }
   loadHealth();
@@ -159,20 +275,32 @@ function initRouting() {
 }
 
 $("#btn-object-back").addEventListener("click", goToSearch);
+$("#btn-configuration-back")?.addEventListener("click", goToConfigurations);
 
 window.addEventListener("popstate", () => {
-  const route = parseObjectRoute();
-  if (route) {
-    loadObjectPage(route.objectType, route.name, route.configuration);
-  } else {
-    showPanel("dashboard");
-    loadHealth();
-    loadConfigurations();
+  const objectRoute = parseObjectRoute();
+  if (objectRoute) {
+    loadObjectPage(objectRoute.objectType, objectRoute.name, objectRoute.configuration);
+    return;
   }
+  const configRoute = parseConfigurationRoute();
+  if (configRoute) {
+    loadConfigurationPage(configRoute.isNew ? null : configRoute.name);
+    return;
+  }
+  showPanel("dashboard");
+  loadHealth();
+  loadConfigurations();
 });
 
 document.querySelectorAll(".tab").forEach((tab) => {
-  tab.addEventListener("click", () => showPanel(tab.dataset.tab));
+  tab.addEventListener("click", () => {
+    if (tab.dataset.tab === "configurations" && window.location.pathname.startsWith("/configuration/")) {
+      history.pushState({}, "", "/");
+      currentConfigurationCard = null;
+    }
+    showPanel(tab.dataset.tab);
+  });
 });
 
 async function loadHealth() {
@@ -216,7 +344,7 @@ async function refreshPendingConfigOps() {
       } else if (job.type === "embed") {
         const name = job.configuration_name;
         if (name) pendingConfigOps.embeds.set(name, job.id);
-      } else if (["index", "reindex", "path", "zip"].includes(job.type)) {
+      } else if (["index", "reindex", "path", "zip", "import_zip", "import_path"].includes(job.type)) {
         const name = job.configuration_name;
         if (name) pendingConfigOps.updates.set(name, job.id);
       }
@@ -227,38 +355,111 @@ async function refreshPendingConfigOps() {
 }
 
 async function startConfigurationUpdate(name) {
+  const btn = $("#btn-config-page-update");
   try {
-    const data = await api(`/configurations/${encodeURIComponent(name)}/index`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ skip_embeddings: true, force: false }),
-    });
-    showConfigJobStatus(data.job_id, name, "update");
-    loadConfigurations();
+    await withButtonLoading(
+      btn,
+      async () => {
+        const data = await api(`/configurations/${encodeURIComponent(name)}/index`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ skip_embeddings: true, force: false }),
+        });
+        showConfigJobStatus(data.job_id, name, "update");
+        loadConfigurations();
+      },
+      { sustainOnSuccess: true }
+    );
   } catch (err) {
     showConfigActionError(err.message);
   }
 }
 
 async function startConfigurationReindex(name) {
+  const btn = $("#btn-config-page-reindex");
   try {
-    const data = await api(`/configurations/${encodeURIComponent(name)}/embed`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ force: false }),
-    });
-    showConfigJobStatus(data.job_id, name, "embed");
-    loadConfigurations();
+    await withButtonLoading(
+      btn,
+      async () => {
+        const data = await api(`/configurations/${encodeURIComponent(name)}/embed`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ force: false }),
+        });
+        showConfigJobStatus(data.job_id, name, "embed");
+        loadConfigurations();
+      },
+      { sustainOnSuccess: true }
+    );
   } catch (err) {
     showConfigActionError(err.message);
   }
 }
 
 function showConfigActionError(message) {
-  const el = $("#configs-action-status");
-  el.classList.remove("hidden", "completed", "running");
-  el.classList.add("failed");
-  el.textContent = message;
+  const el = activeJobStatusContainer();
+  const textEl = el?.querySelector(".job-status-text") || el?.querySelector("[id$='-action-text']");
+  el?.classList.remove("hidden", "completed", "running");
+  el?.classList.add("failed");
+  hideProgressBar();
+  if (textEl) textEl.textContent = message;
+  else if (el) el.textContent = message;
+}
+
+function hideProgressBar() {
+  ["#configs-progress-bar", "#configuration-progress-bar"].forEach((sel) => {
+    $(sel)?.classList.add("hidden");
+  });
+  ["#configs-progress-fill", "#configuration-progress-fill"].forEach((sel) => {
+    const fill = $(sel);
+    if (fill) fill.style.width = "0%";
+  });
+}
+
+function updateProgressBar(job) {
+  const onConfigPage = $("#panel-configuration")?.classList.contains("active");
+  const bar = $(onConfigPage ? "#configuration-progress-bar" : "#configs-progress-bar");
+  const fill = $(onConfigPage ? "#configuration-progress-fill" : "#configs-progress-fill");
+  if (!bar || !fill) return;
+  const progress = job?.progress;
+  if (!progress || job.status === "completed" || job.status === "failed") {
+    bar.classList.add("hidden");
+    fill.style.width = "0%";
+    return;
+  }
+  bar.classList.remove("hidden");
+  if (progress.percent != null && progress.total) {
+    bar.classList.remove("indeterminate");
+    fill.style.width = `${Math.min(100, progress.percent)}%`;
+  } else {
+    bar.classList.add("indeterminate");
+    fill.style.width = "40%";
+  }
+}
+
+function configMatchesFilter(config) {
+  const q = configFilterText.trim().toLowerCase();
+  if (!q) return true;
+  const haystack = [
+    config.name,
+    config.synonym,
+    config.version,
+    config.has_export ? "выгрузка" : "нет выгрузки",
+    config.in_database ? "база" : "",
+    config.embedding_status,
+  ]
+    .filter(Boolean)
+    .join(" ")
+    .toLowerCase();
+  return haystack.includes(q);
+}
+
+function applyConfigFilter() {
+  document.querySelectorAll("#configs-body tr[data-config-name]").forEach((row) => {
+    const name = row.dataset.configName;
+    const config = configurations.find((c) => c.name === name);
+    row.classList.toggle("config-row-filtered-out", config ? !configMatchesFilter(config) : false);
+  });
 }
 
 function configActionStates(config) {
@@ -267,11 +468,11 @@ function configActionStates(config) {
   const embedding = pendingConfigOps.embeds.has(config.name);
   const busy = deleting || updating || embedding;
   const canUpdate = config.has_export;
-  const canReindex = config.in_database && config.has_export;
+  const canReindex = config.in_database && (config.has_export || config.objects_count > 0);
   const busyHint = embedding
     ? "Идёт переиндексация — дождитесь завершения"
     : updating
-      ? "Идёт обновление — дождитесь завершения"
+      ? "Идёт операция — дождитесь завершения"
       : deleting
         ? "Идёт удаление — дождитесь завершения"
         : "";
@@ -281,41 +482,53 @@ function configActionStates(config) {
     deleteDisabled: busy,
     deleteLabel: deleting ? "Удаление…" : config.in_database ? "Удалить" : "Удалить слот",
     updateDisabled: busy || !canUpdate,
-    updateLabel: updating ? "Обновление…" : "Обновить",
-    updateHint: !canUpdate ? "Нет выгрузки в слоте" : busyHint,
+    updateLabel: updating ? "Обновление…" : "Обновить метаданные",
+    updateHint: !canUpdate
+      ? "Подключите источник файлов в «Обновить из файлов»"
+      : busyHint || "Парсинг XML и чанки в базу, без эмбеддингов",
     reindexDisabled: busy || !canReindex,
     reindexLabel: embedding ? "Переиндексация…" : "Переиндексировать",
-    reindexHint: !canReindex ? "Сначала обновите метаданные" : busyHint,
+    reindexHint: !canReindex
+      ? "Нет чанков в базе — сначала обновите метаданные"
+      : !config.has_export
+        ? "Эмбеддинги по чанкам в базе (источник XML не подключён)"
+        : busyHint || "Только эмбеддинги и FAISS по чанкам в базе",
+    fullIndexLabel: updating ? "Индексация…" : "Полная индексация",
+    importZipLabel: updating ? "Обновление…" : "Подключить ZIP",
+    importPathLabel: updating ? "Обновление…" : "Подключить путь",
+    updating,
+    deleting,
+    embedding,
   };
 }
 
 function exportStatusLabel(config) {
   if (config.slot_status === "invalid") {
-    return '<span class="warn-text">битая выгрузка</span>';
+    return '<span class="warn-text" title="Configuration.xml не найден или повреждён">битая выгрузка</span>';
   }
   if (config.has_export && config.export_linked) {
-    return '<span class="ok-text" title="Читает из staging без копирования">staging</span>';
+    return '<span class="ok-text" title="Путь привязан без копирования">привязка</span>';
   }
-  if (config.has_export) return '<span class="ok-text">в слоте</span>';
-  if (config.in_database) return '<span class="warn-text">нет в слоте</span>';
-  return '<span class="warn-text">нет выгрузки</span>';
+  if (config.has_export) return '<span class="ok-text" title="Файлы в хранилище">подключён</span>';
+  if (config.in_database) return '<span class="warn-text" title="Укажите источник на странице управления">нет источника</span>';
+  return '<span class="warn-text">нет источника</span>';
 }
 
 function indexStatusLabel(config) {
   if (!config.in_database) return "не индексировалась";
   if (!config.has_export && config.slot_status !== "ready") {
-    return "индекс без слота";
+    return '<span class="warn-text" title="Индекс в базе, источник XML не подключён">индекс без источника</span>';
   }
-  if (!config.in_database || !config.indexed_at) return "готов к индексации";
+  if (!config.indexed_at) return "готова к обновлению";
   return escapeHtml(config.indexed_at);
 }
 
 function embeddingStatusLabel(config) {
   const model = config.embedding_model;
   const provider = config.embeddings_provider || "";
-  const custom = config.embeddings_custom ? "" : " (дефолт)";
+  const custom = config.embeddings_custom ? "" : " (по умолчанию)";
   if (config.embedding_status === "ready") {
-    return '<span class="muted">настроить при индексации</span>';
+    return '<span class="warn-text" title="Выгрузка есть, FAISS ещё не построен">нет индекса</span>';
   }
   if (config.embedding_status === "ok") {
     return escapeHtml(`${provider || ""} · ${model || "ok"}${custom}`);
@@ -340,9 +553,7 @@ async function loadConfigurations() {
     tbody.innerHTML = configurations
       .map((c) => {
         const actions = configActionStates(c);
-        const updateDisabled = actions.updateDisabled ? " disabled" : "";
-        const reindexDisabled = actions.reindexDisabled ? " disabled" : "";
-        const deleteDisabled = actions.deleteDisabled ? " disabled" : "";
+        const manageUrl = configurationPageUrl(c.name);
         return `
       <tr data-config-name="${escapeHtml(c.name)}" class="${actions.busy ? "config-row-busy" : ""}">
         <td>${escapeHtml(c.name)}</td>
@@ -353,24 +564,18 @@ async function loadConfigurations() {
         <td>${indexStatusLabel(c)}</td>
         <td>${embeddingStatusLabel(c)}</td>
         <td>
-          <div class="btn-group">
-            <button type="button" class="btn secondary btn-config-update" data-name="${escapeHtml(c.name)}"${updateDisabled} title="${escapeHtml(actions.updateHint || "Парсинг XML и чанки без эмбеддингов")}">${actions.updateLabel}</button>
-            <button type="button" class="btn secondary btn-config-reindex" data-name="${escapeHtml(c.name)}"${reindexDisabled} title="${escapeHtml(actions.reindexHint || "Эмбеддинги и FAISS по чанкам в базе")}">${actions.reindexLabel}</button>
-            <button type="button" class="btn danger btn-delete" data-name="${escapeHtml(c.name)}"${deleteDisabled} title="${escapeHtml(actions.busyHint || "")}">${actions.deleteLabel}</button>
-          </div>
+          <a href="${manageUrl}" class="btn secondary btn-config-manage" data-name="${escapeHtml(c.name)}">Управление</a>
         </td>
       </tr>`;
       })
       .join("");
-    tbody.querySelectorAll(".btn-config-update").forEach((btn) => {
-      btn.addEventListener("click", () => startConfigurationUpdate(btn.dataset.name));
+    tbody.querySelectorAll(".btn-config-manage").forEach((btn) => {
+      btn.addEventListener("click", (e) => {
+        e.preventDefault();
+        navigateToConfiguration(btn.dataset.name);
+      });
     });
-    tbody.querySelectorAll(".btn-config-reindex").forEach((btn) => {
-      btn.addEventListener("click", () => startConfigurationReindex(btn.dataset.name));
-    });
-    tbody.querySelectorAll(".btn-delete").forEach((btn) => {
-      btn.addEventListener("click", () => deleteConfig(btn.dataset.name, btn));
-    });
+    applyConfigFilter();
     resumeActiveJobs();
   } catch (err) {
     tbody.innerHTML = `<tr><td colspan="8" class="muted">Ошибка: ${escapeHtml(err.message)}</td></tr>`;
@@ -475,53 +680,155 @@ async function ensureWizardSlot(name) {
   });
 }
 
-async function openWizard(name) {
+function renderConfigurationStatus(card) {
+  const el = $("#configuration-status");
+  if (!el || !card) return;
+  const sourceText = card.has_export
+    ? card.export_linked
+      ? "привязка к пути"
+      : "файлы в хранилище"
+    : card.in_database
+      ? "нет источника"
+      : "не подключён";
+  el.innerHTML = `
+    <div class="configuration-status-grid">
+      <div><span class="label">В базе</span><span class="value">${card.in_database ? "да" : "нет"}</span></div>
+      <div><span class="label">Источник XML</span><span class="value">${escapeHtml(sourceText)}</span></div>
+      <div><span class="label">Объектов</span><span class="value">${card.in_database ? card.objects_count : "—"}</span></div>
+      <div><span class="label">Метаданные</span><span class="value">${card.indexed_at ? escapeHtml(card.indexed_at) : "—"}</span></div>
+      <div><span class="label">Эмбеддинги</span><span class="value">${embeddingStatusLabel(card)}</span></div>
+    </div>
+  `;
+  $("#configuration-no-source-banner")?.classList.toggle("hidden", Boolean(card.has_export));
+}
+
+function updateConfigurationPageActions(card) {
+  if (!card) return;
+  const actions = configActionStates(card);
+  syncConfigButton($("#btn-config-page-update"), {
+    disabled: actions.updateDisabled,
+    loading: actions.updating,
+    label: actions.updateLabel,
+    title: actions.updateHint,
+  });
+  syncConfigButton($("#btn-config-page-reindex"), {
+    disabled: actions.reindexDisabled,
+    loading: actions.embedding,
+    label: actions.reindexLabel,
+    title: actions.reindexHint,
+  });
+  syncConfigButton($("#btn-config-page-delete"), {
+    disabled: actions.deleteDisabled,
+    loading: actions.deleting,
+    label: actions.deleteLabel,
+    title: actions.busyHint || "",
+  });
+  syncConfigButton($("#btn-wizard-index"), {
+    disabled: actions.busy || !card.has_export,
+    loading: actions.updating,
+    label: actions.fullIndexLabel,
+    title: card.has_export
+      ? "Метаданные и эмбеддинги с параметрами ниже"
+      : "Сначала подключите источник файлов",
+  });
+  syncConfigButton($("#btn-wizard-import-zip"), {
+    disabled: actions.busy,
+    loading: actions.updating,
+    label: actions.importZipLabel,
+  });
+  syncConfigButton($("#btn-wizard-import-path"), {
+    disabled: actions.busy,
+    loading: actions.updating,
+    label: actions.importPathLabel,
+  });
+}
+
+async function loadConfigurationPage(name) {
+  showPanel("configuration");
+  document.querySelectorAll(".tab").forEach((t) => t.classList.remove("active"));
+  $(".tab[data-tab='configurations']")?.classList.add("active");
+
   clearWizardStatuses();
   wizardZipFile = null;
   $("#wizard-input-zip").value = "";
   $("#wizard-zip-filename").textContent = "";
-  const overlay = $("#wizard-overlay");
-  overlay?.classList.remove("hidden");
-  overlay?.setAttribute("aria-hidden", "false");
+  $("#wizard-source-path").value = "";
+  $("#configuration-action-status")?.classList.add("hidden");
 
-  if (name) {
-    $("#wizard-config-name").value = name;
-    $("#wizard-config-name").readOnly = true;
-    $("#wizard-title").textContent = `Обновить: ${name}`;
-    try {
-      const card = await api(`/configurations/${encodeURIComponent(name)}`);
-      $("#wizard-slot-path").textContent = card.export_slot_path || "";
-      $("#wizard-slot-hint").textContent = card.has_export
-        ? card.export_linked
-          ? "Слот привязан к staging-пути. Можно заменить ZIP/путём или сразу проверить и индексировать."
-          : "Выгрузка в слоте. Можно заменить ZIP/путём или сразу проверить и индексировать."
-        : "Слот пуст — импортируйте выгрузку.";
-      await loadWizardEmbeddings(name);
-    } catch (err) {
-      setWizardStatus("#wizard-import-status", err.message, "error");
-    }
-  } else {
+  const isNew = !name || name === "new";
+  if (isNew) {
+    currentConfigurationCard = null;
+    $("#configuration-title").textContent = "Новая конфигурация";
+    $("#configuration-status").innerHTML =
+      '<p class="hint">Укажите имя или источник файлов — имя подставится из Configuration.xml.</p>';
+    $("#configuration-no-source-banner")?.classList.remove("hidden");
     $("#wizard-config-name").value = "";
     $("#wizard-config-name").readOnly = false;
-    $("#wizard-title").textContent = "Новая конфигурация";
     $("#wizard-slot-path").textContent = "output/exports/…";
     $("#wizard-slot-hint").textContent =
-      "Укажите путь к выгрузке или ZIP — имя подставится из Configuration.xml.";
+      "Укажите путь к выгрузке или ZIP — имя заполнится автоматически.";
+    updateConfigurationPageActions({
+      name: "",
+      in_database: false,
+      has_export: false,
+      objects_count: 0,
+    });
+    return;
   }
-  $("#wizard-source-path").value = "";
+
+  $("#configuration-title").textContent = name;
+  $("#configuration-status").innerHTML = '<p class="muted">Загрузка…</p>';
+  $("#wizard-config-name").value = name;
+  $("#wizard-config-name").readOnly = true;
+
+  try {
+    const card = await api(`/configurations/${encodeURIComponent(name)}`);
+    currentConfigurationCard = card;
+    $("#wizard-slot-path").textContent = card.export_slot_path || `output/exports/${name}`;
+    $("#wizard-slot-hint").textContent = card.has_export
+      ? card.export_linked
+        ? "Источник привязан к пути на сервере. Можно заменить файлы или сразу обновить метаданные."
+        : "Источник подключён. Можно заменить файлы или сразу обновить метаданные."
+      : "Источник не подключён — укажите ZIP или путь в блоке «Обновить из файлов».";
+    renderConfigurationStatus(card);
+    await loadWizardEmbeddings(name);
+    await refreshPendingConfigOps();
+    updateConfigurationPageActions(card);
+  } catch (err) {
+    $("#configuration-status").innerHTML = `<p class="muted">Ошибка: ${escapeHtml(err.message)}</p>`;
+  }
+}
+
+async function openWizard(name) {
+  navigateToConfiguration(name);
 }
 
 function closeWizard() {
-  const overlay = $("#wizard-overlay");
-  overlay?.classList.add("hidden");
-  overlay?.setAttribute("aria-hidden", "true");
+  goToConfigurations();
+}
+
+function updateSkipEmbeddingsHint() {
+  const hint = $("#wizard-skip-embeddings-hint");
+  const skip = Boolean($("#wizard-skip-embeddings")?.checked);
+  if (!hint) return;
+  hint.textContent = skip
+    ? "Будет обновлена только текстовая информация, без возможности семантического поиска."
+    : "Обновится текстовая информация и семантический поиск по изменённым файлам.";
 }
 
 function setupWizard() {
-  on("#btn-new-configuration", "click", () => openWizard(null));
-  on("#btn-wizard-close", "click", closeWizard);
-  on("#wizard-overlay", "click", (e) => {
-    if (e.target?.id === "wizard-overlay") closeWizard();
+  on("#btn-new-configuration", "click", () => navigateToConfiguration(null));
+  on("#btn-config-page-update", "click", () => {
+    const name = $("#wizard-config-name")?.value.trim();
+    if (name) startConfigurationUpdate(name);
+  });
+  on("#btn-config-page-reindex", "click", () => {
+    const name = $("#wizard-config-name")?.value.trim();
+    if (name) startConfigurationReindex(name);
+  });
+  on("#btn-config-page-delete", "click", () => {
+    const name = $("#wizard-config-name")?.value.trim();
+    if (name) deleteConfig(name, $("#btn-config-page-delete"));
   });
 
   document.querySelectorAll(".wizard-import-tabs .subtab").forEach((tab) => {
@@ -582,6 +889,19 @@ function setupWizard() {
       "hidden",
       $("#wizard-skip-embeddings").checked
     );
+    updateSkipEmbeddingsHint();
+  });
+
+  on("#wizard-mirror-path", "change", () => {
+    $("#wizard-mirror-warning")?.classList.toggle(
+      "hidden",
+      !$("#wizard-mirror-path")?.checked
+    );
+  });
+
+  on("#configs-filter", "input", (e) => {
+    configFilterText = e.target.value;
+    applyConfigFilter();
   });
 
   on("#btn-wizard-import-zip", "click", wizardImportZip);
@@ -589,6 +909,7 @@ function setupWizard() {
   on("#btn-wizard-detect", "click", wizardDetect);
   on("#btn-wizard-test-embeddings", "click", wizardTestEmbeddings);
   on("#btn-wizard-index", "click", wizardStartIndex);
+  updateSkipEmbeddingsHint();
 }
 
 function setWizardZipFile(file) {
@@ -618,6 +939,11 @@ async function wizardDetectFromSourcePath(source, options = {}) {
     nameInput.value = data.name;
     $("#wizard-slot-path").textContent = `output/exports/${data.name}`;
     await ensureWizardSlot(data.name);
+    if ($("#panel-configuration")?.classList.contains("active")) {
+      history.replaceState({}, "", configurationPageUrl(data.name));
+      $("#configuration-title").textContent = data.name;
+      nameInput.readOnly = true;
+    }
   }
 
   const label = `${data.name}${data.synonym ? ` (${data.synonym})` : ""}`;
@@ -652,25 +978,25 @@ async function wizardImportZip() {
     setWizardStatus("#wizard-import-status", "Выберите ZIP-файл", "error");
     return;
   }
+  const btn = $("#btn-wizard-import-zip");
   try {
-    const name = await wizardConfigName();
-    const form = new FormData();
-    form.append("file", wizardZipFile);
-    const data = await api(`/configurations/${encodeURIComponent(name)}/import`, {
-      method: "POST",
-      body: form,
-    });
-    $("#wizard-config-name").value = data.detected_name || name;
-    if (data.detected_name && data.detected_name !== name) {
-      setWizardStatus(
-        "#wizard-import-status",
-        `Импорт OK, но имя в XML «${data.detected_name}» ≠ слот «${name}»`,
-        "error"
-      );
-      return;
-    }
-    setWizardStatus("#wizard-import-status", `Импортировано в слот «${name}»`, "ok");
-    await loadWizardEmbeddings(name);
+    await withButtonLoading(
+      btn,
+      async () => {
+        const name = await wizardConfigName();
+        const form = new FormData();
+        form.append("file", wizardZipFile);
+        const data = await api(
+          `/configurations/${encodeURIComponent(name)}/import?async_job=true`,
+          { method: "POST", body: form }
+        );
+        history.replaceState({}, "", configurationPageUrl(name));
+        currentConfigurationCard = { name, in_database: false, has_export: false };
+        showConfigJobStatus(data.job_id, name, "import");
+        loadConfigurations();
+      },
+      { sustainOnSuccess: true }
+    );
   } catch (err) {
     setWizardStatus("#wizard-import-status", err.message, "error");
   }
@@ -684,78 +1010,81 @@ async function wizardImportPath() {
   }
   const mirror = Boolean($("#wizard-mirror-path")?.checked);
   const btn = $("#btn-wizard-import-path");
-  const prevLabel = btn?.textContent || "";
-  if (btn) {
-    btn.disabled = true;
-    btn.textContent = mirror ? "Копирование…" : "Привязка…";
-  }
   try {
-    if (!$("#wizard-config-name").value.trim()) {
-      await wizardDetectFromSourcePath(source, { quiet: true });
-    }
-    const name = await wizardConfigName();
-    const data = await api(`/configurations/${encodeURIComponent(name)}/import-path`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ source, mirror }),
-    });
-    if (data.detected_name && data.detected_name !== name) {
-      setWizardStatus(
-        "#wizard-import-status",
-        `${mirror ? "Скопировано" : "Привязано"}, но XML «${data.detected_name}» ≠ слот «${name}»`,
-        "error"
-      );
-      return;
-    }
-    setWizardStatus(
-      "#wizard-import-status",
-      mirror ? `Скопировано в слот «${name}»` : `Путь привязан к слоту «${name}»`,
-      "ok"
+    await withButtonLoading(
+      btn,
+      async () => {
+        if (!$("#wizard-config-name").value.trim()) {
+          await wizardDetectFromSourcePath(source, { quiet: true });
+        }
+        const name = await wizardConfigName();
+        const data = await api(
+          `/configurations/${encodeURIComponent(name)}/import-path?async_job=true`,
+          {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ source, mirror }),
+          }
+        );
+        history.replaceState({}, "", configurationPageUrl(name));
+        currentConfigurationCard = { name, in_database: false, has_export: false };
+        showConfigJobStatus(data.job_id, name, "import");
+        loadConfigurations();
+      },
+      { sustainOnSuccess: true }
     );
-    await loadWizardEmbeddings(name);
   } catch (err) {
     setWizardStatus("#wizard-import-status", err.message, "error");
-  } finally {
-    if (btn) {
-      btn.disabled = false;
-      btn.textContent = prevLabel || "Привязать путь к слоту";
-    }
   }
 }
 
 async function wizardDetect() {
+  const btn = $("#btn-wizard-detect");
   try {
-    const name = await wizardConfigName();
-    const data = await api(`/configurations/${encodeURIComponent(name)}/detect`, { method: "POST" });
-    const label = `${data.name}${data.synonym ? ` (${data.synonym})` : ""}`;
-    if (!data.matches_expected) {
-      setWizardStatus("#wizard-detect-status", data.message || `Несовпадение: ${label}`, "error");
-      return;
-    }
-    setWizardStatus("#wizard-detect-status", `OK: ${label}`, "ok");
-    if (data.embeddings) {
-      data.embeddings.configuration = name;
-      applyWizardEmbeddings(data.embeddings);
-    } else {
-      await loadWizardEmbeddings(name);
-    }
+    await withButtonLoading(
+      btn,
+      async () => {
+        const name = await wizardConfigName();
+        const data = await api(`/configurations/${encodeURIComponent(name)}/detect`, { method: "POST" });
+        const label = `${data.name}${data.synonym ? ` (${data.synonym})` : ""}`;
+        if (!data.matches_expected) {
+          setWizardStatus("#wizard-detect-status", data.message || `Несовпадение: ${label}`, "error");
+          return;
+        }
+        setWizardStatus("#wizard-detect-status", `OK: ${label}`, "ok");
+        if (data.embeddings) {
+          data.embeddings.configuration = name;
+          applyWizardEmbeddings(data.embeddings);
+        } else {
+          await loadWizardEmbeddings(name);
+        }
+      },
+      { loadingLabel: "Проверка…" }
+    );
   } catch (err) {
     setWizardStatus("#wizard-detect-status", err.message, "error");
   }
 }
 
 async function wizardTestEmbeddings() {
+  const btn = $("#btn-wizard-test-embeddings");
   try {
-    const name = await wizardConfigName();
-    const data = await api(wizardEmbeddingsTestUrl(name), {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(wizardEmbeddingsPayload()),
-    });
-    setWizardStatus(
-      "#wizard-embeddings-status",
-      `OK: ${data.provider}, ${data.model}, dim=${data.dimension}`,
-      "ok"
+    await withButtonLoading(
+      btn,
+      async () => {
+        const name = await wizardConfigName();
+        const data = await api(wizardEmbeddingsTestUrl(name), {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(wizardEmbeddingsPayload()),
+        });
+        setWizardStatus(
+          "#wizard-embeddings-status",
+          `OK: ${data.provider}, ${data.model}, dim=${data.dimension}`,
+          "ok"
+        );
+      },
+      { loadingLabel: "Проверка…" }
     );
   } catch (err) {
     setWizardStatus("#wizard-embeddings-status", err.message, "error");
@@ -763,62 +1092,103 @@ async function wizardTestEmbeddings() {
 }
 
 async function wizardStartIndex() {
+  const btn = $("#btn-wizard-index");
   try {
-    const name = await wizardConfigName();
-    const skipEmbeddings = $("#wizard-skip-embeddings").checked;
-    const body = {
-      skip_embeddings: skipEmbeddings,
-      force: $("#wizard-force").checked,
-    };
-    if (!skipEmbeddings) body.embeddings = wizardEmbeddingsPayload();
-    const data = await api(`/configurations/${encodeURIComponent(name)}/index`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(body),
-    });
-    closeWizard();
-    showWizardJobStatus(data.job_id, name);
+    await withButtonLoading(
+      btn,
+      async () => {
+        const name = await wizardConfigName();
+        const skipEmbeddings = $("#wizard-skip-embeddings").checked;
+        const body = {
+          skip_embeddings: skipEmbeddings,
+          force: $("#wizard-force").checked,
+        };
+        if (!skipEmbeddings) body.embeddings = wizardEmbeddingsPayload();
+        const data = await api(`/configurations/${encodeURIComponent(name)}/index`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(body),
+        });
+        showWizardJobStatus(data.job_id, name);
+      },
+      { sustainOnSuccess: true }
+    );
   } catch (err) {
     setWizardStatus("#wizard-index-status", err.message, "error");
   }
 }
 
 function jobRunningLabel(configName, kind) {
-  const labels = {
-    update: `Обновление «${configName}»…`,
-    embed: `Переиндексация «${configName}»…`,
-    delete: `Удаление «${configName}»…`,
-    full: `Индексация «${configName}»…`,
-  };
-  return labels[kind] || labels.update;
+  const prefix = JOB_KIND_LABELS[kind] || JOB_KIND_LABELS.update;
+  return `${prefix}: «${configName}»…`;
+}
+
+function setJobStatusText(_el, text) {
+  const onConfigPage = $("#panel-configuration")?.classList.contains("active");
+  const textEl = $(onConfigPage ? "#configuration-action-text" : "#configs-action-text");
+  if (textEl) textEl.textContent = text;
+}
+
+function activeJobStatusContainer() {
+  if ($("#panel-configuration")?.classList.contains("active")) {
+    return $("#configuration-action-status");
+  }
+  return $("#configs-action-status");
 }
 
 function formatJobLogLine(line) {
   return String(line || "").replace(/^\[\d{2}:\d{2}:\d{2}\]\s*/, "");
 }
 
+function jobStatusMessage(job, configName, kind) {
+  const lastLog = job.logs?.length ? job.logs[job.logs.length - 1] : "";
+  if (job.status === "completed") {
+    if (kind === "delete") {
+      const count = job.stats?.objects_count ?? "?";
+      return `Удалено: ${job.configuration_name || configName} (${count} объектов)`;
+    }
+    if (kind === "import") {
+      return `Обновление из файлов завершено: ${job.configuration_name || configName}`;
+    }
+    return `Готово: ${job.configuration_name || configName}`;
+  }
+  if (job.status === "failed") {
+    return `Ошибка: ${job.error || "неизвестная"}`;
+  }
+  if (job.progress?.message) {
+    return formatJobLogLine(job.progress.message);
+  }
+  if (lastLog) {
+    return formatJobLogLine(lastLog);
+  }
+  return jobRunningLabel(configName, kind);
+}
+
 function createJobStatusHandler(el, configName, kind) {
   return (job) => {
-    const lastLog = job.logs?.length ? job.logs[job.logs.length - 1] : "";
     if (job.status === "completed") {
       el.classList.remove("running");
       el.classList.add("completed");
-      if (kind === "delete") {
-        const count = job.stats?.objects_count ?? "?";
-        el.textContent = `Удалено: ${job.configuration_name || configName} (${count} объектов)`;
-      } else {
-        el.textContent = `Готово: ${job.configuration_name || configName}`;
-      }
+      hideProgressBar();
     } else if (job.status === "failed") {
       el.classList.remove("running");
       el.classList.add("failed");
-      el.textContent = `Ошибка: ${job.error || "неизвестная"}`;
-    } else if (lastLog) {
-      el.textContent = formatJobLogLine(lastLog);
+      hideProgressBar();
     } else {
-      el.textContent = jobRunningLabel(configName, kind);
+      updateProgressBar(job);
     }
+    setJobStatusText(el, jobStatusMessage(job, configName, kind));
   };
+}
+
+function resetJobLogView(jobId) {
+  jobLogOffsets.set(jobId, 0);
+  const out = $("#logs-output");
+  if (out) {
+    out.innerHTML = "";
+    out.dataset.jobId = jobId;
+  }
+  $("#logs-truncated-hint")?.classList.add("hidden");
 }
 
 function showConfigJobStatus(jobId, configName, kind = "update", options = {}) {
@@ -830,10 +1200,11 @@ function showConfigJobStatus(jobId, configName, kind = "update", options = {}) {
   } else {
     pendingConfigOps.updates.set(configName, jobId);
   }
-  const el = $("#configs-action-status");
-  el.classList.remove("hidden", "completed", "failed");
-  el.classList.add("running");
-  el.textContent = jobRunningLabel(configName, kind);
+  const el = activeJobStatusContainer();
+  el?.classList.remove("hidden", "completed", "failed");
+  el?.classList.add("running");
+  setJobStatusText(el, jobRunningLabel(configName, kind));
+  resetJobLogView(jobId);
   if (switchToLogs) {
     showPanel("logs");
   }
@@ -863,13 +1234,27 @@ function resumeActiveJobs() {
 
   if (!jobId || !configName || !kind) return;
 
-  const el = $("#configs-action-status");
-  el.classList.remove("hidden", "completed", "failed");
-  el.classList.add("running");
-  el.textContent = jobRunningLabel(configName, kind);
-  selectedJobId = jobId;
-  pollJob(jobId, createJobStatusHandler(el, configName, kind));
-  applyConfigRowStates();
+  api(`/configurations/jobs/${jobId}`)
+    .then((job) => {
+      if (["import_zip", "import_path"].includes(job.type)) {
+        kind = "import";
+      } else if (job.type === "embed") {
+        kind = "embed";
+      } else if (job.type === "delete") {
+        kind = "delete";
+      } else if (job.type === "index" || job.type === "zip" || job.type === "path") {
+        kind = job.type === "index" ? "update" : "full";
+      }
+      const el = activeJobStatusContainer();
+      el?.classList.remove("hidden", "completed", "failed");
+      el?.classList.add("running");
+      setJobStatusText(el, jobRunningLabel(configName, kind));
+      selectedJobId = jobId;
+      resetJobLogView(jobId);
+      pollJob(jobId, createJobStatusHandler(el, configName, kind));
+      applyConfigRowStates();
+    })
+    .catch(() => {});
 }
 
 function showWizardJobStatus(jobId, configName) {
@@ -885,28 +1270,25 @@ async function deleteConfig(name, triggerBtn) {
   const slotOnly = config && !config.in_database;
   const confirmText = slotOnly
     ? `Удалить слот «${name}»?\nПапка выгрузки на диске будет удалена. Записи в базе нет.`
-    : `Удалить конфигурацию «${name}» из базы?\nMarkdown и FAISS-индекс на диске также будут удалены.\n\nДля больших конфигураций удаление может занять несколько минут — прогресс будет во вкладке «Логи».`;
+    : `Удалить конфигурацию «${name}» из базы?\nMarkdown и FAISS-индекс на диске также будут удалены.\n\nДля больших конфигураций удаление может занять несколько минут — прогресс будет на вкладке «Задачи».`;
   if (!confirm(confirmText)) {
     return;
   }
   const btn = triggerBtn || null;
-  const prevLabel = btn ? btn.textContent : "";
-  if (btn) {
-    btn.disabled = true;
-    btn.textContent = "Запуск…";
-  }
   try {
-    const data = await api(
-      `/configurations/${encodeURIComponent(name)}?async_job=true`,
-      { method: "DELETE" }
+    await withButtonLoading(
+      btn,
+      async () => {
+        const data = await api(
+          `/configurations/${encodeURIComponent(name)}?async_job=true`,
+          { method: "DELETE" }
+        );
+        pendingConfigOps.deletes.set(name, data.job_id);
+        showDeleteJobStatus(data.job_id, name);
+      },
+      { sustainOnSuccess: true }
     );
-    pendingConfigOps.deletes.set(name, data.job_id);
-    showDeleteJobStatus(data.job_id, name);
   } catch (err) {
-    if (btn) {
-      btn.disabled = false;
-      btn.textContent = prevLabel || "Удалить";
-    }
     showDeleteError(err.message);
     alert(`Ошибка: ${err.message}`);
   }
@@ -917,28 +1299,76 @@ function showDeleteJobStatus(jobId, name) {
 }
 
 function showDeleteError(message) {
-  const el = $("#configs-action-status");
-  el.classList.remove("hidden", "completed", "running");
-  el.classList.add("failed");
-  el.textContent = `Ошибка: ${message}`;
+  const el = activeJobStatusContainer();
+  el?.classList.remove("hidden", "completed", "running");
+  el?.classList.add("failed");
+  hideProgressBar();
+  setJobStatusText(el, `Ошибка: ${message}`);
   selectedJobId = null;
   $("#logs-title").textContent = "Лог сервера";
   $("#logs-output").innerHTML = "";
+  delete $("#logs-output")?.dataset.jobId;
   logsSinceId = 0;
   showPanel("logs");
   refreshServerLogs();
 }
 
+function trimLogOutput(out) {
+  const lines = out.querySelectorAll(".log-line");
+  if (lines.length > MAX_LOG_DOM_LINES) {
+    const removeCount = lines.length - MAX_LOG_DOM_LINES;
+    for (let i = 0; i < removeCount; i++) {
+      lines[i].remove();
+    }
+    $("#logs-truncated-hint")?.classList.remove("hidden");
+  }
+}
+
+function appendJobLogs(job, reset = false) {
+  const out = $("#logs-output");
+  if (!out) return;
+  const jobKey = job.id || selectedJobId;
+  if (reset || out.dataset.jobId !== jobKey) {
+    out.innerHTML = "";
+    out.dataset.jobId = jobKey;
+    jobLogOffsets.set(jobKey, 0);
+    $("#logs-truncated-hint")?.classList.add("hidden");
+  }
+  const titleName = job.configuration_name || job.source || (jobKey || "").slice(0, 8);
+  $("#logs-title").textContent = `Задача: ${titleName}`;
+  const newLines = job.logs || [];
+  const atBottom = out.scrollHeight - out.scrollTop <= out.clientHeight + 40;
+  newLines.forEach((line) => {
+    out.insertAdjacentHTML(
+      "beforeend",
+      `<span class="log-line info">${escapeHtml(line)}</span>\n`
+    );
+  });
+  trimLogOutput(out);
+  if (atBottom || reset) {
+    out.scrollTop = out.scrollHeight;
+  }
+}
+
 function pollJob(jobId, onUpdate) {
   if (activeJobPoll) clearInterval(activeJobPoll);
+  if (!jobLogOffsets.has(jobId)) jobLogOffsets.set(jobId, 0);
   const tick = async () => {
     try {
-      const job = await api(`/configurations/jobs/${jobId}`);
+      const offset = jobLogOffsets.get(jobId) || 0;
+      const job = await api(`/configurations/jobs/${jobId}?since_log=${offset}`);
+      jobLogOffsets.set(jobId, job.logs_total ?? offset + (job.logs?.length || 0));
       if (onUpdate) onUpdate(job);
-      if (selectedJobId === jobId) renderJobLogs(job);
-      if ($("#panel-configurations").classList.contains("active")) {
+      if (selectedJobId === jobId) {
+        appendJobLogs(job, offset === 0 && !$("#logs-output")?.dataset.jobId);
+      }
+      if ($("#panel-configurations")?.classList.contains("active")) {
         await refreshPendingConfigOps();
         applyConfigRowStates();
+      }
+      if ($("#panel-configuration")?.classList.contains("active") && currentConfigurationCard?.name) {
+        await refreshPendingConfigOps();
+        updateConfigurationPageActions(currentConfigurationCard);
       }
       if (job.status === "completed" || job.status === "failed") {
         clearInterval(activeJobPoll);
@@ -946,6 +1376,9 @@ function pollJob(jobId, onUpdate) {
         await refreshPendingConfigOps();
         refreshJobs();
         loadConfigurations();
+        if ($("#panel-configuration")?.classList.contains("active") && currentConfigurationCard?.name) {
+          await loadConfigurationPage(currentConfigurationCard.name);
+        }
       }
     } catch (_) { /* ignore */ }
   };
@@ -960,24 +1393,6 @@ function applyConfigRowStates() {
     if (!config) return;
     const actions = configActionStates(config);
     row.classList.toggle("config-row-busy", actions.busy);
-    const updateBtn = row.querySelector(".btn-config-update");
-    const reindexBtn = row.querySelector(".btn-config-reindex");
-    const deleteBtn = row.querySelector(".btn-delete");
-    if (updateBtn) {
-      updateBtn.disabled = actions.updateDisabled;
-      updateBtn.textContent = actions.updateLabel;
-      updateBtn.title = actions.updateHint || "Парсинг XML и чанки без эмбеддингов";
-    }
-    if (reindexBtn) {
-      reindexBtn.disabled = actions.reindexDisabled;
-      reindexBtn.textContent = actions.reindexLabel;
-      reindexBtn.title = actions.reindexHint || "Эмбеддинги и FAISS по чанкам в базе";
-    }
-    if (deleteBtn) {
-      deleteBtn.disabled = actions.deleteDisabled;
-      deleteBtn.textContent = actions.deleteLabel;
-      deleteBtn.title = actions.busyHint || "";
-    }
   });
 }
 
@@ -1043,12 +1458,16 @@ async function refreshJobs() {
     }
     list.innerHTML = jobs
       .map(
-        (j) => `
+        (j) => {
+          const statusLabel = JOB_STATUS_LABELS[j.status] || j.status;
+          const typeLabel = JOB_TYPE_LABELS[j.type] || j.type;
+          return `
       <li data-id="${j.id}" class="${j.id === selectedJobId ? "selected" : ""}">
         <div>${escapeHtml(j.configuration_name || j.source || j.id.slice(0, 8))}</div>
-        <div class="job-type">${escapeHtml(j.type)} · ${escapeHtml(j.created_at?.slice(0, 19) || "")}</div>
-        <span class="job-status-badge ${j.status}">${escapeHtml(j.status)}</span>
-      </li>`
+        <div class="job-type">${escapeHtml(typeLabel)} · ${escapeHtml(j.created_at?.slice(0, 19) || "")}</div>
+        <span class="job-status-badge ${j.status}">${escapeHtml(statusLabel)}</span>
+      </li>`;
+        }
       )
       .join("");
     list.querySelectorAll("li[data-id]").forEach((li) => {
@@ -1056,7 +1475,9 @@ async function refreshJobs() {
         selectedJobId = li.dataset.id;
         list.querySelectorAll("li").forEach((x) => x.classList.remove("selected"));
         li.classList.add("selected");
+        resetJobLogView(selectedJobId);
         const job = await api(`/configurations/jobs/${selectedJobId}`);
+        jobLogOffsets.set(selectedJobId, job.logs_total ?? job.logs?.length ?? 0);
         renderJobLogs(job);
       });
     });
@@ -1068,10 +1489,11 @@ async function refreshJobs() {
 $("#btn-refresh-jobs").addEventListener("click", refreshJobs);
 
 function renderJobLogs(job) {
-  $("#logs-title").textContent = `Лог задачи ${job.id.slice(0, 8)}`;
-  const out = $("#logs-output");
-  out.innerHTML = (job.logs || []).map((line) => `<span class="log-line info">${escapeHtml(line)}</span>`).join("\n");
-  out.scrollTop = out.scrollHeight;
+  appendJobLogs(job, true);
+  if (job.id) {
+    jobLogOffsets.set(job.id, job.logs_total ?? job.logs?.length ?? 0);
+  }
+  updateProgressBar(job);
 }
 
 async function refreshServerLogs() {
@@ -1120,11 +1542,14 @@ $("#btn-logs-clear").addEventListener("click", () => {
 
 $("#btn-logs-refresh").addEventListener("click", async () => {
   if (selectedJobId) {
+    resetJobLogView(selectedJobId);
     const job = await api(`/configurations/jobs/${selectedJobId}`);
+    jobLogOffsets.set(selectedJobId, job.logs_total ?? job.logs?.length ?? 0);
     renderJobLogs(job);
   } else {
     logsSinceId = 0;
     $("#logs-output").innerHTML = "";
+    delete $("#logs-output")?.dataset.jobId;
     await refreshServerLogs();
   }
 });
@@ -1134,6 +1559,7 @@ document.addEventListener("keydown", (e) => {
     selectedJobId = null;
     $("#logs-title").textContent = "Лог сервера";
     $("#logs-output").innerHTML = "";
+    delete $("#logs-output")?.dataset.jobId;
     logsSinceId = 0;
     refreshJobs();
     refreshServerLogs();

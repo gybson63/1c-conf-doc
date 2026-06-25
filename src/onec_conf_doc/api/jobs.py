@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import re
 import tempfile
 import threading
 import traceback
@@ -35,6 +36,10 @@ from onec_conf_doc.rag.pipeline import DeleteConfigurationResult, IndexStats, Pi
 logger = logging.getLogger("onec_conf_doc.jobs")
 
 MAX_JOBS = 100
+MAX_JOB_LOG_LINES = 500
+
+_PROGRESS_OBJECTS = re.compile(r"Обработано\s+(\d+)/(\d+)\s+объект")
+_PROGRESS_EMBEDDINGS = re.compile(r"Эмбеддинги:\s+(\d+)/(\d+)")
 
 
 class JobStatus(StrEnum):
@@ -53,6 +58,8 @@ class JobType(StrEnum):
     INDEX = "index"
     EMBED = "embed"
     DELETE = "delete"
+    IMPORT_ZIP = "import_zip"
+    IMPORT_PATH = "import_path"
 
 
 @dataclass
@@ -81,9 +88,44 @@ class Job:
             "configuration_name": self.configuration_name,
         }
 
-    def to_detail(self) -> dict[str, Any]:
+    def progress_snapshot(self) -> dict[str, Any] | None:
+        """Structured progress parsed from the latest relevant log line."""
+        for line in reversed(self.logs):
+            match = _PROGRESS_OBJECTS.search(line)
+            if match:
+                current, total = int(match.group(1)), int(match.group(2))
+                percent = round(100 * current / total) if total else None
+                return {
+                    "phase": "objects",
+                    "current": current,
+                    "total": total,
+                    "percent": percent,
+                    "message": line,
+                }
+            match = _PROGRESS_EMBEDDINGS.search(line)
+            if match:
+                current, total = int(match.group(1)), int(match.group(2))
+                percent = round(100 * current / total) if total else None
+                return {
+                    "phase": "embeddings",
+                    "current": current,
+                    "total": total,
+                    "percent": percent,
+                    "message": line,
+                }
+        if self.logs:
+            return {"phase": self.status.value, "message": self.logs[-1]}
+        return None
+
+    def to_detail(self, *, since_log: int = 0) -> dict[str, Any]:
         result = self.to_summary()
-        result["logs"] = list(self.logs)
+        offset = max(0, min(since_log, len(self.logs)))
+        result["logs"] = list(self.logs[offset:])
+        result["logs_offset"] = offset
+        result["logs_total"] = len(self.logs)
+        progress = self.progress_snapshot()
+        if progress is not None:
+            result["progress"] = progress
         if self.stats is not None:
             result["stats"] = self.stats
         if self.error is not None:
@@ -142,6 +184,8 @@ class JobStore:
         ts = datetime.now(tz=UTC).strftime("%H:%M:%S")
         line = f"[{ts}] {message}"
         job.logs.append(line)
+        if len(job.logs) > MAX_JOB_LOG_LINES:
+            job.logs = job.logs[-MAX_JOB_LOG_LINES:]
         logger.info("[%s] %s", job.id[:8], message)
 
 
@@ -554,6 +598,105 @@ def run_delete_job(
         job.error = str(exc)
         store._append_log(job, f"Ошибка: {exc}")
         logger.exception("Delete job %s failed", job.id)
+
+
+def start_slot_import_zip(
+    store: JobStore,
+    config: AppConfig,
+    configuration_name: str,
+    zip_path: Path,
+) -> Job:
+    name = validate_slot_name(configuration_name)
+    ensure_export_slot(config, name)
+    job = store.create(
+        JobType.IMPORT_ZIP,
+        source=zip_path.name,
+        configuration_name=name,
+    )
+    store._append_log(job, f"Импорт ZIP в слот «{name}»…")
+
+    def worker() -> None:
+        try:
+            job.status = JobStatus.EXTRACTING
+            store._append_log(job, "Распаковка архива…")
+            export_root = import_zip_to_configuration_slot(config, name, zip_path)
+            detected = detect_export_configuration(export_root)
+            validate_expected_configuration(detected, name)
+            job.configuration_name = name
+            job.status = JobStatus.COMPLETED
+            store._append_log(
+                job,
+                f"Готово: «{name}» импортирован"
+                + (f" ({detected.synonym})" if detected.synonym else ""),
+            )
+        except (UploadError, OSError, zipfile.BadZipFile, ValueError) as exc:
+            job.status = JobStatus.FAILED
+            job.error = str(exc)
+            store._append_log(job, f"Ошибка: {exc}")
+            logger.exception("Import ZIP job %s failed", job.id)
+        except Exception as exc:
+            job.status = JobStatus.FAILED
+            job.error = str(exc)
+            store._append_log(job, f"Ошибка: {exc}\n{traceback.format_exc()}")
+            logger.exception("Import ZIP job %s failed", job.id)
+        finally:
+            zip_path.unlink(missing_ok=True)
+
+    threading.Thread(target=worker, daemon=True).start()
+    return job
+
+
+def start_slot_import_path(
+    store: JobStore,
+    config: AppConfig,
+    configuration_name: str,
+    source_path: Path,
+    *,
+    mirror: bool = False,
+) -> Job:
+    name = validate_slot_name(configuration_name)
+    ensure_export_slot(config, name)
+    job = store.create(
+        JobType.IMPORT_PATH,
+        source=str(source_path),
+        configuration_name=name,
+    )
+    mode = "копирование в слот" if mirror else "привязка пути"
+    store._append_log(job, f"Импорт «{name}»: {mode}…")
+
+    def worker() -> None:
+        try:
+            job.status = JobStatus.EXTRACTING
+            if mirror:
+                store._append_log(job, "Копирование файлов — может занять много времени…")
+            export_root = import_path_to_configuration_slot(
+                config,
+                name,
+                source_path,
+                mirror=mirror,
+            )
+            detected = detect_export_configuration(export_root)
+            validate_expected_configuration(detected, name)
+            job.configuration_name = name
+            job.status = JobStatus.COMPLETED
+            store._append_log(
+                job,
+                f"Готово: «{name}» — {mode}"
+                + (f" ({detected.synonym})" if detected.synonym else ""),
+            )
+        except (UploadError, OSError, ValueError) as exc:
+            job.status = JobStatus.FAILED
+            job.error = str(exc)
+            store._append_log(job, f"Ошибка: {exc}")
+            logger.exception("Import path job %s failed", job.id)
+        except Exception as exc:
+            job.status = JobStatus.FAILED
+            job.error = str(exc)
+            store._append_log(job, f"Ошибка: {exc}")
+            logger.exception("Import path job %s failed", job.id)
+
+    threading.Thread(target=worker, daemon=True).start()
+    return job
 
 
 def start_delete_job(

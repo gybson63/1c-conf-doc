@@ -112,12 +112,46 @@ main {
 }
 
 .btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.45rem;
   border: none;
   border-radius: 6px;
   padding: 0.5rem 1rem;
   font-size: 0.875rem;
   cursor: pointer;
   font-family: inherit;
+}
+
+.btn.is-loading {
+  cursor: wait;
+}
+
+.btn.is-loading::before {
+  content: "";
+  width: 0.875em;
+  height: 0.875em;
+  flex-shrink: 0;
+  border: 2px solid currentColor;
+  border-right-color: transparent;
+  border-radius: 50%;
+  animation: btn-spin 0.65s linear infinite;
+  opacity: 0.9;
+}
+
+@keyframes btn-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .btn.is-loading::before {
+    animation: none;
+    border-right-color: currentColor;
+    opacity: 0.6;
+  }
 }
 
 .btn.primary {
@@ -166,12 +200,103 @@ main {
   flex-wrap: wrap;
 }
 
-#configs-table tr.config-row-busy {
-  background: rgba(99, 179, 237, 0.08);
-}
-
 #configs-action-status.running {
   border-left-color: var(--accent, #63b3ed);
+}
+
+.configs-help {
+  margin: 0 0 1rem;
+  padding: 0.75rem 1rem;
+  background: var(--surface2);
+  border-radius: 6px;
+  border-left: 3px solid var(--accent);
+}
+
+.configs-toolbar {
+  margin-bottom: 0.75rem;
+}
+
+.configs-filter-label {
+  display: block;
+  max-width: 360px;
+}
+
+.configs-filter-label input {
+  width: 100%;
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 0.5rem 0.75rem;
+  color: var(--text);
+  font-size: 0.9rem;
+}
+
+#configs-table tr.config-row-busy {
+  background: rgba(99, 179, 237, 0.08);
+  box-shadow: inset 3px 0 0 var(--accent);
+}
+
+#configs-table tr.config-row-filtered-out {
+  display: none;
+}
+
+#configs-action-status {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+#configs-action-text {
+  display: block;
+}
+
+.progress-bar {
+  height: 6px;
+  background: var(--border);
+  border-radius: 3px;
+  overflow: hidden;
+}
+
+.progress-fill {
+  height: 100%;
+  background: var(--accent);
+  border-radius: 3px;
+  width: 0%;
+  transition: width 0.3s ease;
+}
+
+.progress-bar.indeterminate .progress-fill {
+  width: 40%;
+  animation: progress-indeterminate 1.2s ease-in-out infinite;
+}
+
+@keyframes progress-indeterminate {
+  0% { transform: translateX(-100%); }
+  100% { transform: translateX(350%); }
+}
+
+.mirror-warning {
+  padding: 0.65rem 0.85rem;
+  background: rgba(245, 197, 66, 0.1);
+  border-radius: 6px;
+  border-left: 3px solid var(--warn);
+  margin: 0.5rem 0;
+}
+
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+#logs-truncated-hint {
+  margin: 0.5rem 0 0;
 }
 
 .muted {
@@ -591,6 +716,74 @@ td.path {
 
 .badge.ok { background: rgba(61, 214, 140, 0.15); color: var(--ok); }
 .badge.error { background: rgba(245, 101, 101, 0.15); color: var(--error); }
+
+.configuration-card .card-header {
+  flex-wrap: wrap;
+  gap: 0.75rem;
+}
+
+.configuration-card .card-header h2 {
+  flex: 1;
+  min-width: 0;
+  word-break: break-word;
+}
+
+.configuration-status-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+  gap: 0.75rem 1.25rem;
+  margin: 1rem 0;
+  padding: 1rem;
+  background: var(--surface2);
+  border-radius: var(--radius);
+  border: 1px solid var(--border);
+}
+
+.configuration-status-grid .label {
+  display: block;
+  font-size: 0.75rem;
+  color: var(--muted);
+  margin-bottom: 0.15rem;
+}
+
+.configuration-status-grid .value {
+  font-size: 0.9rem;
+}
+
+.config-alert {
+  margin: 0 0 1rem;
+  padding: 0.75rem 1rem;
+  border-radius: var(--radius);
+  border: 1px solid rgba(245, 197, 66, 0.35);
+  background: rgba(245, 197, 66, 0.08);
+  color: var(--text);
+  font-size: 0.9rem;
+}
+
+.configuration-actions {
+  flex-wrap: wrap;
+  margin-bottom: 0.75rem;
+}
+
+.configuration-index-options {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  margin-bottom: 0.75rem;
+}
+
+.configuration-index-option {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.option-hint {
+  margin: 0 0 0 1.5rem;
+  font-size: 0.82rem;
+  color: var(--muted);
+  line-height: 1.45;
+}
 
 .wizard-overlay {
   position: fixed;

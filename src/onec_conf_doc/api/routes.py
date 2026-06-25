@@ -27,6 +27,8 @@ from onec_conf_doc.api.jobs import (
     start_path_index,
     start_reindex_job,
     start_slot_embed,
+    start_slot_import_path,
+    start_slot_import_zip,
     start_slot_index,
     start_zip_index,
 )
@@ -338,12 +340,16 @@ def create_router() -> APIRouter:
         return [job.to_summary() for job in jobs.list_jobs(limit=limit)]
 
     @router.get("/configurations/jobs/{job_id}")
-    def get_job(job_id: str, request: Request) -> dict[str, Any]:
+    def get_job(
+        job_id: str,
+        request: Request,
+        since_log: int = Query(default=0, ge=0),
+    ) -> dict[str, Any]:
         jobs = get_jobs(request)
         job = jobs.get(job_id)
         if job is None:
             raise HTTPException(status_code=404, detail=f"Job not found: {job_id}")
-        return job.to_detail()
+        return job.to_detail(since_log=since_log)
 
     @router.get("/configurations/{name}")
     def get_configuration(name: str, request: Request) -> dict[str, Any]:
@@ -410,8 +416,10 @@ def create_router() -> APIRouter:
         request: Request,
         file: UploadFile | None = File(None),  # noqa: B008
         source: str | None = Form(None),
+        async_job: bool = Query(default=False),
     ) -> dict[str, Any]:
         config = get_config(request)
+        jobs = get_jobs(request)
         try:
             slot_name = validate_slot_name(name)
             ensure_export_slot(config, slot_name)
@@ -425,6 +433,22 @@ def create_router() -> APIRouter:
                 status_code=400,
                 detail="Provide exactly one of: ZIP file or source path",
             )
+
+        if async_job:
+            if not has_file:
+                raise HTTPException(
+                    status_code=400,
+                    detail="async_job поддерживается только для ZIP-файла",
+                )
+            upload = file
+            assert upload is not None
+            if not upload.filename or not upload.filename.lower().endswith(".zip"):
+                raise HTTPException(status_code=400, detail="Only .zip files are supported")
+            with tempfile.NamedTemporaryFile(suffix=".zip", delete=False) as tmp:
+                tmp_path = Path(tmp.name)
+                tmp.write(await upload.read())
+            job = start_slot_import_zip(jobs, config, slot_name, tmp_path)
+            return {"job_id": job.id, "status": JobStatus.PENDING.value, "name": slot_name}
 
         try:
             if has_file:
@@ -466,11 +490,27 @@ def create_router() -> APIRouter:
         name: str,
         body: ImportPathRequest,
         request: Request,
+        async_job: bool = Query(default=False),
     ) -> dict[str, Any]:
         config = get_config(request)
+        jobs = get_jobs(request)
         try:
             slot_name = validate_slot_name(name)
             ensure_export_slot(config, slot_name)
+        except ExportSlotError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+        if async_job:
+            job = start_slot_import_path(
+                jobs,
+                config,
+                slot_name,
+                Path(body.source),
+                mirror=body.mirror,
+            )
+            return {"job_id": job.id, "status": JobStatus.PENDING.value, "name": slot_name}
+
+        try:
             export_root = import_path_to_configuration_slot(
                 config,
                 slot_name,
@@ -977,6 +1017,10 @@ def create_ui_router(static_dir: Path) -> APIRouter:
         object_type: str,
         name: str,
     ) -> FileResponse:
+        return FileResponse(static_dir / "index.html")
+
+    @router.get("/configuration/{name:path}", include_in_schema=False)
+    def configuration_page(name: str) -> FileResponse:
         return FileResponse(static_dir / "index.html")
 
     return router
